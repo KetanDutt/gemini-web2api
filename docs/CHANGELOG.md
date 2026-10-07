@@ -423,7 +423,9 @@ was reproduced.
 
   `/status` gains a `credentials` section — per account, its source, whether a
   SAPISID is present, cooldown remaining, uses and last error. No field can
-  carry a cookie, and a test asserts it.
+  carry a cookie, and a test asserts it. The web console's Status tab renders it
+  as an **Accounts** table, so which account is resting — and why — is visible
+  without reading JSON.
 
 ### Changed
 
@@ -579,7 +581,7 @@ was reproduced.
 
 ### Tests
 
-- 18 tests → **633**, all offline. The Gemini wire protocol is faked at the frame
+- 18 tests → **634**, all offline. The Gemini wire protocol is faked at the frame
   level so real parsing and real HTTP handling are exercised without a network.
 - New modules for config layering, cookie formats, model resolution, protocol
   framing and streaming, prompt/tool parsing, every HTTP route, security

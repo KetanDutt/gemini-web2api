@@ -376,6 +376,28 @@ class DashboardScriptTests(unittest.TestCase):
         argv = [self.node] + (["--check", path] if check_only else [path])
         return subprocess.run(argv, capture_output=True, text=True, timeout=60)
 
+    def test_the_account_card_is_wired_and_covered(self):
+        """Node proves the account renderers escape; it cannot prove they run.
+
+        `refreshStatus` reads the payload and writes two elements, which needs a
+        DOM — so the wiring is checked here against the same script the browser
+        gets, and the payload key is checked against the *server's* key by
+        `tests/test_credentials.StatusCredentialReportingTests`. A rename on
+        either side therefore fails a test rather than silently emptying a
+        table. The renderers must also stay inside the extracted chunk: move
+        `accountRows` past `renderMd` and this fails, instead of the escaping
+        assertions quietly covering nothing.
+        """
+        self.assertIn("function accountRows(", self.chunk)
+        self.assertIn("function accountsNote(", self.chunk)
+        script = _dashboard_script()
+        self.assertIn("$('accounts').innerHTML = accountRows(s.credentials);", script)
+        self.assertIn("$('accountsNote').innerHTML = accountsNote(s.credentials);", script)
+        html = webui.render_dashboard({"version": "1.2.0", "uptime_sec": 1.0}).decode("utf-8")
+        self.assertIn('id="accounts"', html)
+        self.assertIn('id="accountsNote"', html)
+        self.assertIn("<th>State</th>", html)
+
     def test_extraction_is_dom_free(self):
         """Guards the extraction itself. If it ever pulled in DOM calls the run
         below would fail for reasons unrelated to escaping."""

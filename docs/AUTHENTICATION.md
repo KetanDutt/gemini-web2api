@@ -237,8 +237,10 @@ avoid. `gemini_bl` stays global: it identifies Google's frontend build, not an
 account.
 
 Per-account health appears in `/status` under `credentials` — source, whether a
-SAPISID is present, cooldown remaining, last error and use count. Never the
-cookie, and never a path to it beyond the file the operator configured.
+SAPISID is present, cooldown remaining, last error and use count — and the web
+console renders it as an **Accounts** table on the Status tab, so "which account
+is resting and why" is answerable without reading JSON. Never the cookie, and
+never a path to it beyond the file the operator configured.
 
 ### Temporary chats
 

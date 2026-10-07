@@ -256,6 +256,12 @@ footer a{color:var(--accent);text-decoration:none}
     <div class="grid" id="runtime"></div>
     <h2>Health checks</h2>
     <div id="checks"></div>
+    <h2>Accounts</h2>
+    <div id="accountsNote"></div>
+    <div class="scroll"><table>
+      <thead><tr><th>Account</th><th>Google index</th><th>SAPISID</th><th>Uses</th><th>State</th></tr></thead>
+      <tbody id="accounts"></tbody>
+    </table></div>
     <h2>Counters</h2>
     <div class="grid" id="counters"></div>
     <h2>Latency</h2>
@@ -370,6 +376,56 @@ const statusPill = (code) => {
   const lvl = code >= 500 ? 'bad' : code >= 400 ? 'warn' : 'ok';
   return pill(code, lvl);
 };
+
+/* ── the cookie pool ───────────────────────────────────────────────────
+ *
+ * Two pure functions rather than inline template code in refreshStatus, so the
+ * Node harness can execute them: the account *source* is a path the operator
+ * chose and the last error is a string from upstream, and both end up in
+ * innerHTML. Anything that reaches innerHTML from outside this file is escaped,
+ * and this is the only way to prove it rather than assert it.
+ * ────────────────────────────────────────────────────────────────────────── */
+function accountsNote(credentials){
+  const c = credentials || {};
+  const size = Number(c.size) || 0;
+  if (!size) {
+    return '<p class="note">No cookie file configured &mdash; requests go to Gemini ' +
+           'anonymously. Add <code>cookie_file</code> or <code>cookie_files</code> ' +
+           'to use an account.</p>';
+  }
+  const parts = [
+    size + (size === 1 ? ' account' : ' accounts'),
+    (Number(c.available) || 0) + ' available',
+  ];
+  parts.push(c.rotating ? 'rotation enabled' : 'no rotation (one account)');
+  if (c.rotating && c.cooldown_sec != null) parts.push('cooldown ' + c.cooldown_sec + 's');
+  // Escaped per part, then joined with an entity. Escaping the joined string
+  // would turn the separator itself into `&amp;middot;`, and un-doing that with
+  // a replace afterwards is how a helper quietly becomes wrong.
+  return '<p class="note">' + parts.map((p) => esc(p)).join(' &middot; ') + '</p>';
+}
+function accountRows(credentials){
+  const c = credentials || {};
+  const entries = c.entries || [];
+  if (!entries.length) {
+    return '<tr><td colspan="5" class="note">No accounts configured.</td></tr>';
+  }
+  return entries.map((a) => {
+    const cooling = !a.usable;
+    const secs = Number(a.cooldown_remaining_sec) || 0;
+    // `pill` escapes its own text, so the error string is passed through raw —
+    // escaping it here as well would render "&" as "&amp;amp;".
+    const state = cooling
+      ? pill('cooling ' + (secs > 0 ? Math.ceil(secs) + 's' : '') +
+             (a.last_error ? ' (HTTP ' + a.last_error + ')' : ''), 'warn')
+      : pill('ready', 'ok');
+    return '<tr><td><code>' + esc(a.source) + '</code></td>' +
+      '<td>' + esc(a.auth_user == null ? '\u2014' : a.auth_user) + '</td>' +
+      '<td>' + (a.has_sapisid ? 'yes' : '<span class="note">no</span>') + '</td>' +
+      '<td>' + esc(Number(a.uses) || 0) + '</td>' +
+      '<td>' + state + '</td></tr>';
+  }).join('');
+}
 
 /* ── minimal, safe markdown: escape first, then format ─────────────── */
 function inlineMd(t){
@@ -558,6 +614,9 @@ async function refreshStatus(){
     $('byStatus').innerHTML = keys.length ? keys.map((k) =>
       '<tr><td>' + statusPill(Number(k)) + '</td><td>' + esc(codes[k]) + '</td></tr>').join('')
       : '<tr><td colspan="2" class="note">No responses recorded yet.</td></tr>';
+
+    $('accountsNote').innerHTML = accountsNote(s.credentials);
+    $('accounts').innerHTML = accountRows(s.credentials);
 
     const cfg = s.config || {};
     $('cfgTable').innerHTML = Object.keys(cfg).sort().map((k) =>

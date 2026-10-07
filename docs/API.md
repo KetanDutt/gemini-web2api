@@ -446,7 +446,7 @@ requests, so it works air-gapped. It has five tabs:
 | Tab | What it does |
 |---|---|
 | **Chat** | A streaming playground. Keeps conversations in your browser's `localStorage`, supports multiple saved chats, model and thinking-depth selection, and a Stop button. Multi-turn works by resending the transcript, since Gemini's web endpoint is single-turn. |
-| **Status** | Runtime cards, health checks, counters, latency, histogram, per-model breakdown, status codes and the redacted config. Auto-refreshes every 10s. |
+| **Status** | Runtime cards, health checks, the **account pool** (one row per configured cookie, with its Google index, use count and whether it is ready or resting), counters, latency, histogram, per-model breakdown, status codes and the redacted config. Auto-refreshes every 10s. |
 | **Activity** | The `history` table from `/status`, filterable by all / errors / route. Auto-refreshes every 5s. |
 | **Models** | Every model with its category, output budget and whether it needs a cookie. |
 | **API** | Endpoint reference plus ready-to-paste client config and a `curl` example. |
