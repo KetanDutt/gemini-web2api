@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -1012,6 +1013,305 @@ class WorkerParityTests(unittest.TestCase):
             result.returncode, 0,
             f"node --check failed on cloudflare/worker.js:\n{result.stderr}",
         )
+
+
+# Executes cloudflare/worker.js under Node with upstream fetch stubbed out, so
+# routing can be asserted behaviourally instead of only syntax-checked. Printed
+# on one line behind a marker because the Worker logs to stdout as it runs.
+_WORKER_HARNESS = """
+const attempts = [];
+globalThis.fetch = async (url) => {
+  attempts.push(String(url && url.url ? url.url : url));
+  throw new Error('SENTINEL: upstream fetch attempted');
+};
+const mod = (await import('./worker.mjs')).default;
+const env = {
+  API_KEYS: '["sk-test"]',
+  COOKIE_STRING: '',
+  RETRY_ATTEMPTS: '1',
+  RETRY_DELAY_SEC: '0',
+  REQUEST_TIMEOUT_SEC: '30',
+  FINGERPRINT_JITTER_MS: '0',
+};
+async function call(label, method, path, body, headers) {
+  attempts.length = 0;
+  const h = Object.assign({ 'Content-Type': 'application/json' }, headers || {});
+  const req = new Request('https://worker.test' + path, {
+    method: method,
+    headers: h,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const rec = { label: label, method: method, path: path, status: 0,
+                code: null, cors: null, upstream: 0, threw: null, body: null };
+  try {
+    const res = await mod.fetch(req, env, { waitUntil: function () {} });
+    rec.status = res.status;
+    rec.cors = res.headers.get('access-control-allow-origin');
+    let text = '';
+    try { text = await res.text(); } catch (e) { text = ''; }
+    try { rec.body = JSON.parse(text); } catch (e) {}
+    if (rec.body && rec.body.error) rec.code = rec.body.error.code || null;
+  } catch (e) { rec.threw = String(e.message).slice(0, 120); }
+  rec.upstream = attempts.length;
+  return rec;
+}
+const auth = { Authorization: 'Bearer sk-test' };
+const out = [];
+out.push(await call('options', 'OPTIONS', '/anything'));
+out.push(await call('badkey', 'POST', '/v1/chat/completions', {},
+                    { Authorization: 'Bearer wrong' }));
+out.push(await call('apikey_header', 'GET', '/health', undefined,
+                    { 'x-api-key': 'sk-test' }));
+out.push(await call('health', 'GET', '/health', undefined, auth));
+out.push(await call('models', 'GET', '/v1/models', undefined, auth));
+out.push(await call('google_models', 'GET', '/v1beta/models', undefined, auth));
+out.push(await call('notfound', 'GET', '/nope', undefined, auth));
+out.push(await call('embeddings', 'POST', '/v1/embeddings',
+                    { model: 'gemini-3.6-flash', input: 'hi' }, auth));
+out.push(await call('audio', 'POST', '/v1/audio/speech',
+                    { model: 'gemini-3.6-flash', input: 'hi' }, auth));
+out.push(await call('images', 'POST', '/v1/images/generations',
+                    { prompt: 'a cat' }, auth));
+out.push(await call('catchall', 'POST', '/v1/some/client/path',
+                    { messages: [{ role: 'user', content: 'hi' }] }, auth));
+out.push(await call('empty_chat', 'POST', '/v1/chat/completions', {}, auth));
+console.log('@@RESULT@@' + JSON.stringify(out));
+"""
+
+
+class WorkerRoutingTests(unittest.TestCase):
+    """Run the Cloudflare Worker and assert how it routes.
+
+    `node --check` only proves the Worker parses. It cannot see that
+    `POST /v1/embeddings` used to fall through to chat completions and answer
+    `400 empty prompt` — a misleading status for an endpoint that will never be
+    implemented, and one that spent a real Gemini call whenever the body
+    happened to carry `messages`. `docs/API.md` promised 501 for exactly these
+    three endpoints, so the Worker contradicted the project's own reference.
+
+    Upstream `fetch` is stubbed to throw and to record that it was called, so
+    these assertions are offline and, crucially, can prove an endpoint answers
+    *without* consuming quota.
+    """
+
+    WORKER = os.path.join(REPO_ROOT, "cloudflare", "worker.js")
+    MARKER = "@@RESULT@@"
+    # Generous versus the ~2s a healthy run takes, and far below the 30s
+    # REQUEST_TIMEOUT_SEC the harness configures.
+    MAX_SECONDS = 15.0
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node")
+        if not cls.node:
+            raise unittest.SkipTest("node is not installed")
+        if not os.path.exists(cls.WORKER):
+            raise unittest.SkipTest("cloudflare/worker.js is not present")
+        cls.tmp = tempfile.mkdtemp(prefix="worker-routing-")
+        shutil.copyfile(cls.WORKER, os.path.join(cls.tmp, "worker.mjs"))
+        harness = os.path.join(cls.tmp, "harness.mjs")
+        with open(harness, "w", encoding="utf-8") as handle:
+            handle.write(_WORKER_HARNESS)
+        started = time.monotonic()
+        result = subprocess.run(
+            [cls.node, harness], cwd=cls.tmp,
+            capture_output=True, text=True, timeout=180,
+        )
+        cls.elapsed = time.monotonic() - started
+        line = next((ln for ln in result.stdout.splitlines()
+                     if ln.startswith(cls.MARKER)), None)
+        if line is None:
+            raise AssertionError(
+                f"the Worker harness produced no result (exit {result.returncode})\n"
+                f"stdout:\n{result.stdout[-2000:]}\nstderr:\n{result.stderr[-2000:]}")
+        cls.results = {rec["label"]: rec
+                       for rec in json.loads(line[len(cls.MARKER):])}
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(getattr(cls, "tmp", ""), ignore_errors=True)
+
+    def _rec(self, label):
+        self.assertIn(label, self.results, f"harness did not exercise {label}")
+        rec = self.results[label]
+        self.assertIsNone(
+            rec["threw"],
+            f"{rec['method']} {rec['path']} escaped the handler: {rec['threw']}")
+        return rec
+
+    def test_options_preflight_is_answered_before_authentication(self):
+        rec = self.results["options"]
+        self.assertEqual(rec["status"], 204,
+                         "a CORS preflight must not require credentials")
+        self.assertEqual(rec["cors"], "*")
+        self.assertEqual(rec["upstream"], 0)
+
+    def test_a_bad_key_is_rejected_and_an_alternate_header_accepted(self):
+        self.assertEqual(self._rec("badkey")["status"], 401)
+        self.assertEqual(self._rec("apikey_header")["status"], 200,
+                         "x-api-key is a documented way to authenticate")
+
+    # Prose that states the Worker's current version, as "the Worker is X".
+    # CHANGELOG headings are excluded: they are historical records, and an old
+    # entry must keep naming the version it describes.
+    VERSION_DOCS = ("README.md", "README_CN.md",
+                    os.path.join("cloudflare", "README.MD"))
+
+    def test_health_reports_the_worker_version_and_every_model(self):
+        rec = self._rec("health")
+        self.assertEqual(rec["status"], 200)
+        body = rec["body"] or {}
+        self.assertEqual(body.get("status"), "ok")
+        self.assertEqual(sorted(body.get("models") or []),
+                         sorted(self._worker_model_names()),
+                         "/health and the MODELS table disagree")
+
+    def test_the_documented_health_sample_matches_the_real_response(self):
+        """The deploy guide's sample output must be output the Worker produces.
+
+        `cloudflare/README.MD` tells the reader that seeing this JSON means the
+        deployment worked. The sample it showed invented `hasCookie` and
+        `hasSapisid` — fields the Worker has never returned — and omitted
+        `defaultModel`, which it always has. Anyone diffing their real `/health`
+        against it would conclude a working deploy had failed.
+
+        Compared field-by-field against a live response rather than by eye, so
+        adding or renaming a field in the handler fails until the guide agrees.
+        """
+        doc = os.path.join(REPO_ROOT, "cloudflare", "README.MD")
+        if not os.path.exists(doc):
+            self.skipTest("cloudflare/README.MD is not present")
+        with open(doc, encoding="utf-8") as handle:
+            text = handle.read()
+        blocks = re.findall(r"```json\n(.*?)```", text, re.DOTALL)
+        samples = [b for b in blocks if '"platform": "Cloudflare Workers"' in b]
+        self.assertEqual(
+            len(samples), 1,
+            f"expected exactly one documented /health sample, found {len(samples)}")
+        try:
+            documented = json.loads(samples[0])
+        except ValueError as exc:
+            raise AssertionError(
+                f"the documented /health sample is not valid JSON: {exc}") from exc
+        actual = self._rec("health")["body"] or {}
+        self.assertEqual(
+            sorted(documented), sorted(actual),
+            "the documented /health sample and the real response have different "
+            f"fields: documented-only {sorted(set(documented) - set(actual))}, "
+            f"real-only {sorted(set(actual) - set(documented))}")
+        for key in ("status", "platform", "version", "defaultModel"):
+            self.assertEqual(
+                documented.get(key), actual.get(key),
+                f"the documented /health sample disagrees on {key!r}")
+        self.assertEqual(sorted(documented.get("models") or []),
+                         sorted(actual.get("models") or []),
+                         "the documented model list has drifted from the Worker's")
+
+    def test_the_documented_worker_version_is_the_one_it_reports(self):
+        """What the Worker says it is must match what the docs say it is.
+
+        Comparing `/health` against the version literal in the source proves
+        nothing — the handler reads that same literal, so the two cannot
+        disagree. The comparison that can fail is against the prose, which is
+        updated by hand. Bumping the Worker to 1.6.1 left four references
+        behind at 1.6.0, and nothing noticed.
+        """
+        reported = (self._rec("health")["body"] or {}).get("version")
+        self.assertTrue(reported, "/health did not report a version")
+        stale = {}
+        for relative in self.VERSION_DOCS:
+            path = os.path.join(REPO_ROOT, relative)
+            if not os.path.exists(path):
+                continue
+            with open(path, encoding="utf-8") as handle:
+                text = handle.read()
+            claimed = set(re.findall(r"(\d+\.\d+\.\d+-cf-[\w\-]+)", text))
+            wrong = sorted(claimed - {reported})
+            if wrong:
+                stale[relative] = wrong
+        self.assertEqual(
+            stale, {},
+            f"these docs name a Worker version other than the {reported} it "
+            f"actually reports: {stale}")
+
+    def _worker_model_names(self):
+        with open(self.WORKER, encoding="utf-8") as handle:
+            source = handle.read()
+        start = source.index("var MODELS = {")
+        block = source[start:source.index("\n};", start)]
+        return re.findall(r"'([\w.\-]+)'\s*:\s*\{", block)
+
+    def test_both_model_listings_serve_the_same_ids(self):
+        openai = self._rec("models")
+        google = self._rec("google_models")
+        self.assertEqual(openai["status"], 200)
+        self.assertEqual(google["status"], 200)
+        self.assertEqual((openai["body"] or {}).get("object"), "list")
+        openai_ids = [m["id"] for m in (openai["body"] or {}).get("data", [])]
+        google_names = [m["name"] for m in (google["body"] or {}).get("models", [])]
+        self.assertEqual(sorted(openai_ids), sorted(self._worker_model_names()))
+        self.assertEqual(sorted(google_names),
+                         sorted("models/" + n for n in openai_ids),
+                         "the Google-native listing must prefix names with models/")
+
+    def test_an_unknown_get_is_404(self):
+        self.assertEqual(self._rec("notfound")["status"], 404)
+
+    def test_unimplemented_endpoints_answer_501_without_spending_a_call(self):
+        """The regression this class exists for.
+
+        Each of these must answer 501 with the `unsupported_endpoint` code that
+        `docs/API.md` documents, and must reach upstream zero times. The old
+        fall-through answered 400 and, for a body carrying `messages`, made a
+        real Gemini call for an endpoint that could never succeed.
+        """
+        for label in ("embeddings", "audio", "images"):
+            with self.subTest(endpoint=label):
+                rec = self._rec(label)
+                self.assertEqual(
+                    rec["status"], 501,
+                    f"{rec['path']} must be an explicit 501, not a fall-through")
+                self.assertEqual(rec["code"], "unsupported_endpoint",
+                                 "the code must match docs/API.md")
+                self.assertEqual(
+                    rec["upstream"], 0,
+                    f"{rec['path']} reached Gemini {rec['upstream']} time(s); "
+                    "an unimplemented endpoint must never spend quota")
+
+    def test_the_intentional_chat_fallthrough_is_preserved(self):
+        """The catch-all is a feature, so the fix must not remove it.
+
+        Clients post to slightly different paths and expect chat behaviour, so
+        an unmatched `/v1/*` POST must still be forwarded upstream. Guarding
+        both directions is what keeps the 501 fix from being an over-correction.
+        """
+        rec = self._rec("catchall")
+        self.assertEqual(rec["upstream"], 1,
+                         "an unmatched /v1/* POST should still be forwarded to "
+                         "chat completions; the tolerance was removed")
+        self.assertEqual(rec["status"], 502,
+                         "the stubbed upstream failure should surface as 502")
+        empty = self._rec("empty_chat")
+        self.assertEqual(empty["status"], 400)
+        self.assertEqual(empty["upstream"], 0,
+                         "an empty chat body must be rejected before any call")
+
+    def test_no_dangling_timer_keeps_the_worker_alive(self):
+        """A leaked setTimeout keeps the event loop alive after the answer.
+
+        `geminiStreamGenerate` cleared its request-timeout timer only on the
+        success path, so every *failed* upstream attempt left a timer pending
+        for `requestTimeoutSec`. With retries that is several dangling timers
+        per request, holding isolate memory in production and, as originally
+        observed here, turning a 1.4s run into a 28s one. The harness sets
+        REQUEST_TIMEOUT_SEC=30 and touches upstream twice, so a regression
+        cannot finish within MAX_SECONDS.
+        """
+        self.assertLess(
+            self.elapsed, self.MAX_SECONDS,
+            f"the Worker held the event loop for {self.elapsed:.1f}s, which "
+            "means a request-timeout timer is no longer cleared on the failure "
+            "path")
 
 
 class WindowsLauncherTests(unittest.TestCase):

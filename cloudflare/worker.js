@@ -1175,15 +1175,24 @@ async function geminiStreamGenerate(prompt, modelId, thinkMode, config) {
       }, config.requestTimeoutSec * 1000);
 
       // 发送 HTTP POST 请求
-      var response = await fetch(url, {
-        method: 'POST',
-        headers: headers,
-        body: body,
-        signal: controller.signal,  // 关联中止信号
-      });
-
-      // 请求成功，清除超时定时器
-      clearTimeout(timeout);
+      // clearTimeout 必须放在 finally 里，不能只放在成功路径上：
+      // fetch 抛错（网络失败、DNS、被中止）时会直接跳到外层 catch，
+      // 于是每一次失败的上游请求都会留下一个悬挂 requestTimeoutSec 秒
+      // 的定时器。重试循环最多叠加 retryAttempts 个，既浪费 isolate
+      // 的存活时间与内存，也会拖住任何在 Workers 之外执行本文件的
+      // 事件循环（例如测试）。下方的流式分支已经用 finally 处理了
+      // 同样的问题，此处与其保持一致。
+      var response;
+      try {
+        response = await fetch(url, {
+          method: 'POST',
+          headers: headers,
+          body: body,
+          signal: controller.signal,  // 关联中止信号
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
 
       // ============================================================
       // 错误状态码处理
@@ -2591,7 +2600,7 @@ export default {
       if (path === '/' || path === '/health') {
         return sendJSON({
           status: 'ok',
-          version: '1.6.0-cf-multifingerprint',
+          version: '1.6.1-cf-multifingerprint',
           platform: 'Cloudflare Workers',
           models: Object.keys(MODELS),
           defaultModel: config.defaultModel,
@@ -2672,9 +2681,27 @@ export default {
         return handleGoogleAPI(request, body, false, config);
       }
 
+      // ---- 明确不支持的端点 ----
+      // 这些端点的语义与聊天补全完全不同（向量 / 语音 / 图片），
+      // 兜底转为 chat 只会返回误导性的 400 "empty prompt"，
+      // 并且在请求体恰好带有 messages 时白白消耗一次真实的 Gemini 调用。
+      // 与 Python 版本和 docs/API.md 保持一致：明确返回 501。
+      if (path === '/v1/embeddings' ||
+          path === '/v1/audio/speech' ||
+          path === '/v1/images/generations') {
+        return sendJSON({
+          error: {
+            message: path + ' is not implemented by gemini-web2api',
+            type: 'invalid_request_error',
+            code: 'unsupported_endpoint',
+            param: null,
+          },
+        }, 501);
+      }
+
       // ---- 万能兜底路由 ----
-      // 所有 /v1/ 下的未匹配 POST 请求都自动转为 chat 处理
-      // 兼容各种客户端的路径差异
+      // 其余 /v1/ 下的未匹配 POST 请求仍自动转为 chat 处理，
+      // 以兼容各种客户端的路径差异（这是有意为之的宽容行为）。
       if (path.indexOf('/v1/') === 0) {
         return handleChatCompletions(request, body, config);
       }

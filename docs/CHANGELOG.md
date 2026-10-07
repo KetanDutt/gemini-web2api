@@ -412,6 +412,34 @@ was reproduced.
   returning 501. A placeholder upstream URL reading
   `github.com/your-repo/gemini-web2api` was corrected.
 
+### Cloudflare Worker (1.6.1-cf-multifingerprint)
+
+- `POST /v1/embeddings`, `/v1/audio/speech` and `/v1/images/generations` now
+  answer `501 unsupported_endpoint` instead of falling through to chat
+  completions. These three are semantically nothing like a chat request, so the
+  fall-through could only ever answer `400 "empty prompt"` — a misleading status
+  for endpoints that will never be implemented — and whenever the body happened
+  to carry a `messages` array it made a **real Gemini call** for a request that
+  could not succeed. `docs/API.md` has always documented 501 for exactly these
+  three paths, so the Worker contradicted the project's own API reference.
+  The remaining `/v1/*` fall-through is deliberate tolerance for clients that
+  post to slightly different paths, and is preserved: the fix is guarded in both
+  directions so it cannot silently become an over-correction.
+- A leaked timer kept the isolate alive after every *failed* upstream request.
+  `geminiStreamGenerate` cleared its `requestTimeoutSec` abort timer only on the
+  success path, immediately after `await fetch(...)`, so a rejection jumped
+  straight to the outer `catch` and left the timer pending. With retries that is
+  up to `retryAttempts` dangling timers per request. Moved into a `finally`,
+  matching what the streaming branch below it already did. Observed effect
+  outside Workers: the same failing request held a Node event loop for 28s
+  instead of 1.4s.
+- The deploy guide's sample `/health` response described a Worker that does not
+  exist. It showed `hasCookie` and `hasSapisid` — fields the handler has never
+  returned — omitted `defaultModel`, which it always has, and listed a stale
+  model set. The guide says "if you see JSON like this, deployment succeeded",
+  so a reader diffing their real output against it would conclude a working
+  deploy had failed. Corrected to the bytes the Worker actually emits.
+
 ### Cloudflare Worker (1.6.0-cf-multifingerprint)
 
 - Added `gemini-3.7-flash`, bringing the Worker to 8 models. Its
@@ -429,7 +457,7 @@ was reproduced.
 
 ### Tests
 
-- 18 tests → **508**, all offline. The Gemini wire protocol is faked at the frame
+- 18 tests → **518**, all offline. The Gemini wire protocol is faked at the frame
   level so real parsing and real HTTP handling are exercised without a network.
 - New modules for config layering, cookie formats, model resolution, protocol
   framing and streaming, prompt/tool parsing, every HTTP route, security
@@ -501,6 +529,18 @@ was reproduced.
   rather than shipping. This was the check whose absence let the defect below
   survive: building an sdist and then ignoring it proves only that the build did
   not crash.
+- `WorkerRoutingTests` **executes** `cloudflare/worker.js` under Node with
+  upstream `fetch` stubbed to throw and to record that it was called. Until now
+  the Worker was only ever `node --check`ed, which proves it parses and nothing
+  about what it does; a syntax check cannot see a route answering the wrong
+  status, or a request silently spending quota. Ten assertions now cover CORS
+  preflight before authentication, both API-key header spellings, `/health`
+  agreeing with the source and with the deploy guide's sample, both model
+  listings serving the same ids, 404 on an unknown GET, 501 with zero upstream
+  calls for the three unimplemented endpoints, the preserved chat fall-through,
+  and the absence of a dangling timer. Every one was proven by injecting the
+  violation, including deleting the fall-through to confirm the 501 fix is not
+  an over-correction.
 - `test_the_sdist_ships_every_file_the_docs_promise` closes the class of defect
   rather than the instance: it scans the shipped Markdown for root-level
   filenames and requires every one that actually exists to be named by a

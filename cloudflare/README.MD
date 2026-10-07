@@ -64,13 +64,25 @@ https://你的worker.workers.dev/health
 ```json
 {
   "status": "ok",
-  "version": "1.5.0-cf-multifingerprint",
+  "version": "1.6.1-cf-multifingerprint",
   "platform": "Cloudflare Workers",
-  "models": ["gemini-3.6-flash", "gemini-3.5-flash", "..."],
-  "hasCookie": false,
-  "hasSapisid": false
+  "models": [
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-thinking",
+    "gemini-3.1-pro",
+    "gemini-auto",
+    "gemini-3.5-flash-thinking-lite",
+    "gemini-flash-lite"
+  ],
+  "defaultModel": "gemini-3.6-flash"
 }
 ```
+
+> 以上是 `worker.js` 实际返回的字段，顺序与内容都由 `WorkerRoutingTests` 校验：
+> 早前的示例文档写了 `hasCookie` / `hasSapisid` 两个**并不存在**的字段，
+> 同时漏掉了真实存在的 `defaultModel`，照着它核对部署结果会误判为失败。
 
 ---
 
@@ -300,6 +312,7 @@ Worker 当前支持 **8 个模型**，Python 版本支持 **9 个**。
 | `/v1/chat/completions` | ✅ | ✅ |
 | `/v1/responses`（Codex CLI） | ✅ | ✅ |
 | `/v1/completions`（旧版补全） | ❌ 见下方兜底说明 | ✅ |
+| `/v1/embeddings` `/v1/audio/speech` `/v1/images/generations` | ✅ 返回 501 | ✅ 返回 501 |
 | Google 原生 `/v1beta`（Gemini CLI） | ✅ | ✅ |
 | `/health` 健康检查 | ✅ | ✅ |
 | `/ready` `/status` 探针与指标 | ❌ | ✅ |
@@ -310,13 +323,15 @@ Worker 当前支持 **8 个模型**，Python 版本支持 **9 个**。
 | Web 控制台 | ❌ | ✅ |
 | 环境变量配置 | ✅ Worker 变量 | ✅ `GEMINI_WEB2API_*` |
 
-> 两者的版本号是独立序列：Worker 为 `1.6.0-cf-multifingerprint`，Python 包为 `1.2.0`。版本号接近纯属巧合，不代表功能对应。
+> 两者的版本号是独立序列：Worker 为 `1.6.1-cf-multifingerprint`，Python 包为 `1.2.0`。版本号接近纯属巧合，不代表功能对应。
 
-### 两个需要特别注意的行为差异
+### 需要特别注意的行为差异
 
 **图片会被静默丢弃。** Worker 解析多模态消息数组时只提取 `type` 为 `text` / `input_text` 的部分，`image_url` 与 `inlineData` 被直接忽略且**不报错**。客户端会以为图片已被理解，实际只发送了文字。Python 版本会真正下载并上传图片，或在无法处理时返回 400。
 
-**未匹配的 `POST /v1/*` 会被兜底转为 chat。** Worker 对 `/v1/` 下任何未识别的路径都调用 `handleChatCompletions`。这对容忍客户端路径差异有帮助，但意味着 `POST /v1/embeddings` 不会返回 `501 not implemented`，而是被当作聊天请求处理并产生一次 Gemini 调用。Python 版本对未实现的端点明确返回 501，对未知路径返回 404。
+**其余未匹配的 `POST /v1/*` 仍会被兜底转为 chat。** 这是有意为之的宽容行为，用于兼容各客户端的路径差异。
+
+1.6.1 之前，该兜底覆盖了 `/v1/embeddings`、`/v1/audio/speech` 与 `/v1/images/generations`：这些端点语义与聊天完全不同，兜底只会返回误导性的 `400 empty prompt`，而在请求体恰好带有 `messages` 时还会白白消耗一次真实的 Gemini 调用。现在这三者明确返回 `501 unsupported_endpoint`，与 Python 版本和 [`docs/API.md`](../docs/API.md) 一致，且**不会触达上游**。兜底本身保留，因此其他路径的行为不变。
 
 ### 为什么 Worker 没有 `gemini-3.1-pro-enhanced`
 
@@ -344,6 +359,7 @@ Python 版本的完整文档见仓库根目录的 [`docs/`](../docs/README.md)�
 
 | 版本 | 日期 | 更新内容 |
 |------|------|---------|
+| 1.6.1 | 2026-10-07 | `/v1/embeddings`、`/v1/audio/speech`、`/v1/images/generations` 明确返回 501，不再兜底转为 chat 并消耗真实调用；修复 `geminiStreamGenerate` 上游失败时定时器未清除的泄漏 |
 | 1.6.0 | 2026-10-07 | 新增 `gemini-3.7-flash`；补充与 Python 版本的差异对照表 |
 | 1.5.0 | 2026-07-31 | 新增多指纹轮换、多Cookie轮换、随机延迟机制 |
 | 1.4.0 | 2026-07-30 | 修复并发串扰、速率限制内存安全 |

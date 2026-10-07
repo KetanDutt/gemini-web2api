@@ -422,7 +422,7 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api tests
 ```
 
-508 tests, all offline — the Gemini wire protocol is faked at the frame level.
+518 tests, all offline — the Gemini wire protocol is faked at the frame level.
 CI covers Python 3.8–3.13, a stdlib-only run with no third-party packages, a
 build-and-install-the-wheel check, lint and a Docker build.
 
@@ -452,7 +452,7 @@ allocate. Read the
 [divergence table](cloudflare/README.MD#-与-python-版本的差异) before choosing.
 
 Version numbers are independent sequences: the Worker is
-`1.6.0-cf-multifingerprint`, this package is `1.2.0`.
+`1.6.1-cf-multifingerprint`, this package is `1.2.0`.
 
 ## Acknowledgments
 
