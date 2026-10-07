@@ -47,7 +47,7 @@ tests/
   test_endpoints.py        every HTTP route, request history
   test_security.py         auth, SSRF, limits, rate limiting
   test_metrics.py          metrics, history ring, health probe, dashboard
-  test_packaging.py        build, shim, structure, docs, Windows launcher
+  test_packaging.py        build, shim, structure, docs, launcher, CI itself
 scripts/
   win_setup.py             config generation for start.bat (plain Python)
 start.bat                  one-click Windows launcher
@@ -148,6 +148,20 @@ touching these areas, keep the tests green:
   is not standalone and `node --check` on it alone will fail on undefined names.
   It is shipped in the sdist via `MANIFEST.in` — without it the test errors on a
   machine that has Node.
+* `test_packaging.CIWorkflowTests` — CI must fail when the suite fails. Actions'
+  default shell on Linux is `bash -e {0}`, **without** `pipefail`, so
+  `python -m unittest ... | tee log` reports `tee`'s status and a failing suite
+  still turns the checkmark green. The guards reject a piped suite invocation
+  unless the block really enables `pipefail`, require a captured `$?` to be
+  re-raised with `exit`, and require the step to report how many tests it
+  skipped — a guard that silently skips is indistinguishable from one that ran.
+  They parse `run:` blocks by hand rather than with pyyaml, because the
+  stdlib-only job runs this suite with no third-party packages installed.
+  Note that they scan **commands, not prose**: an earlier version checked for
+  the word `pipefail` in the raw block, and the block's own comment explaining
+  the hazard satisfied it. `test_the_run_blocks_are_actually_parsed` guards the
+  parser itself, since a parser that finds nothing makes the rest pass
+  vacuously.
 * `test_packaging.MarkdownLinkTests` — every relative link and heading anchor in
   the Markdown corpus resolves. Renaming a heading without updating what points
   at it fails here. If you add an anchor link, the slug is GitHub's: lowercase,

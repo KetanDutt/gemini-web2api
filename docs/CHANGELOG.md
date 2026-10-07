@@ -108,6 +108,15 @@ was reproduced.
   nothing reads it at runtime and the image never runs `pip install .`, which is
   the only step that would need pyproject's `readme`.
 
+- CI itself could have gone green on a failing suite. While adding a skip audit,
+  the test step was rewritten as `python -m unittest ... | tee /tmp/out.txt`.
+  Actions' default shell on Linux is `bash -e {0}` — **without** `pipefail` — so
+  a pipeline reports the status of its *last* command. `tee` always succeeds,
+  which means all four matrix jobs would have passed no matter what the suite
+  did. The step now captures the status explicitly, prints the output and the
+  skip audit, and re-raises with `exit ${rc}`. `CIWorkflowTests` guards the
+  invariant so the same edit cannot land silently again.
+
 - `renderMd` in the web console threw on a non-string argument. `re.exec(src)`
   coerces implicitly, but the `src.slice()` that follows does not, so a `null`
   content would break the Chat tab. The server legitimately emits
@@ -405,7 +414,7 @@ was reproduced.
 
 ### Tests
 
-- 18 tests → **503**, all offline. The Gemini wire protocol is faked at the frame
+- 18 tests → **507**, all offline. The Gemini wire protocol is faked at the frame
   level so real parsing and real HTTP handling are exercised without a network.
 - New modules for config layering, cookie formats, model resolution, protocol
   framing and streaming, prompt/tool parsing, every HTTP route, security
@@ -444,6 +453,21 @@ was reproduced.
   where "it looks escaped" is not good enough. All three variants were verified
   to fail on an injected violation: a no-op `esc`, formatting applied before
   escaping, and the removed null coercion. Skipped when Node is absent.
+- `CIWorkflowTests` turns the CI workflow into a guarded artifact. A green
+  checkmark is only evidence if a failure would have turned it red, and this
+  branch shipped a step where it would not (see Fixed). The guards reject a
+  piped suite invocation unless the block really enables `pipefail`, require a
+  captured `$?` to be re-raised with `exit`, and require the step to report how
+  many tests it skipped — since a guard that silently skips is indistinguishable
+  from one that ran. They parse `run:` blocks by hand rather than with pyyaml,
+  because the stdlib-only job runs this suite with no third-party packages.
+  Writing these caught the author twice: the first version checked for the word
+  `pipefail` in the raw block, which the block's own comment explaining the
+  hazard satisfied, so the guard passed on the exact defect it existed to
+  forbid. It now scans commands with comments stripped, and a fifth test guards
+  the parser itself, because a parser that finds nothing makes the other four
+  pass vacuously. All five were verified to fail on an injected violation, and a
+  sixth check confirms a genuine `set -o pipefail` does *not* trip them.
 - `DockerfileTests` cross-checks the Dockerfile against `.dockerignore`
   **statically**, which is the only way to guard this without a container
   runtime: every `COPY` source must survive the ignore rules and exist in the

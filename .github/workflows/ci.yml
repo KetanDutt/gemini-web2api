@@ -34,17 +34,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install httpx
 
-      - name: Probe the toolchain the test guards depend on
-        run: |
-          echo "node: $(command -v node || echo MISSING) $(node --version 2>/dev/null || true)"
-          echo "git:  $(command -v git || echo MISSING)"
-
       - name: Run the test suite
         run: |
-          python -m unittest discover -s tests -t . -v 2>&1 | tee /tmp/out.txt
-          echo "--- skip audit ---"
-          grep -cE '\.\.\. skipped' /tmp/out.txt || true
-          grep -E '\.\.\. skipped' /tmp/out.txt || echo "  (no skips)"
+          # No pipeline here on purpose. Actions' default shell is `bash -e`
+          # WITHOUT pipefail, so `unittest ... | tee` would report tee's exit
+          # status and a failing suite would still pass. Capture the status,
+          # always show the output and the skip audit, then re-raise it.
+          rc=0
+          python -m unittest discover -s tests -t . -v > /tmp/out.txt 2>&1 || rc=$?
+          cat /tmp/out.txt
+          echo "--- toolchain the skip-gated guards depend on ---"
+          echo "node: $(command -v node >/dev/null 2>&1 && node --version || echo MISSING)"
+          echo "git:  $(command -v git >/dev/null 2>&1 && git --version || echo MISSING)"
+          echo "--- skipped tests ---"
+          grep -E '\.\.\. skipped' /tmp/out.txt || echo "  (none)"
+          skips=$(grep -cE '\.\.\. skipped' /tmp/out.txt || true)
+          # Annotations are readable from the API even when job logs are not,
+          # so a silently-skipping guard cannot hide behind a green checkmark.
+          echo "::notice title=test-suite::exit=${rc} skipped=${skips} node=$(command -v node >/dev/null 2>&1 && node --version || echo MISSING)"
+          exit ${rc}
 
   test-without-httpx:
     name: stdlib-only fallback
