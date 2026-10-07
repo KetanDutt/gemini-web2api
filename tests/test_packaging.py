@@ -315,13 +315,38 @@ class DocumentationConsistencyTests(unittest.TestCase):
         self.assertEqual(missing, [], f"docs pages not linked from docs/README.md: {missing}")
 
     def test_every_doc_page_is_reachable_from_the_readme(self):
-        """AUDIT.md is an internal working document, so it is exempt."""
+        """AUDIT.md is an internal working document, so it is exempt.
+
+        Both READMEs are checked, not just the English one. CONTRIBUTING.md was
+        added to README.md and the omission from README_CN.md went unnoticed
+        precisely because this guard only read one file - a translation that
+        silently lists fewer documents than the original is the kind of drift
+        nobody reports, since each page still works when linked.
+        """
         docs_dir = os.path.join(REPO_ROOT, "docs")
-        readme = self._read("README.md")
         pages = [f for f in sorted(os.listdir(docs_dir))
                  if f.endswith(".md") and f not in ("README.md", "AUDIT.md")]
-        missing = [page for page in pages if f"docs/{page}" not in readme]
-        self.assertEqual(missing, [], f"docs pages not linked from README.md: {missing}")
+        self.assertTrue(pages, "docs/ contains no pages")
+        for readme_name in ("README.md", "README_CN.md"):
+            readme = self._read(readme_name)
+            missing = [page for page in pages if f"docs/{page}" not in readme]
+            self.assertEqual(missing, [],
+                             f"docs pages not linked from {readme_name}: {missing}")
+
+    def test_both_readmes_link_the_same_doc_set(self):
+        """The two READMEs are parallel documents; their doc indexes must agree.
+
+        Catches a page linked from one and not the other even when both happen
+        to satisfy the reachability rule above (e.g. an incidental mention).
+        """
+        pattern = re.compile(r"docs/([A-Z]+\.md)")
+        sets = {}
+        for readme_name in ("README.md", "README_CN.md"):
+            sets[readme_name] = set(pattern.findall(self._read(readme_name)))
+        self.assertEqual(sets["README.md"], sets["README_CN.md"],
+                         f"README doc indexes diverge: "
+                         f"only in EN={sorted(sets['README.md'] - sets['README_CN.md'])}, "
+                         f"only in CN={sorted(sets['README_CN.md'] - sets['README.md'])}")
 
     def test_current_version_appears_in_the_changelog(self):
         import gemini_web2api

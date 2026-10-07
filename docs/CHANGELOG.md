@@ -108,6 +108,13 @@ was reproduced.
   nothing reads it at runtime and the image never runs `pip install .`, which is
   the only step that would need pyproject's `readme`.
 
+- `README_CN.md` did not link `docs/CONTRIBUTING.md`. The reachability guard
+  only ever read `README.md`, so a translation that listed fewer documents than
+  the original passed unnoticed — each page still works when linked, which is
+  why nobody reports this class of drift. The guard now reads both READMEs, and
+  a second test asserts the two doc indexes are identical, so a page linked from
+  one and not the other fails even when both satisfy reachability individually.
+
 - Three documentation links pointed at anchors that do not exist:
   `SECURITY.md#ssrf` (the heading is "SSRF protection on image fetching"),
   `AUTHENTICATION.md#authenticating-to-google` (the heading is "Outbound:
@@ -389,7 +396,7 @@ was reproduced.
 
 ### Tests
 
-- 18 tests → **499**, all offline. The Gemini wire protocol is faked at the frame
+- 18 tests → **500**, all offline. The Gemini wire protocol is faked at the frame
   level so real parsing and real HTTP handling are exercised without a network.
 - New modules for config layering, cookie formats, model resolution, protocol
   framing and streaming, prompt/tool parsing, every HTTP route, security

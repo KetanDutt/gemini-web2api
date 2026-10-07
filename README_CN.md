@@ -340,6 +340,7 @@ curl -s http://localhost:8081/status | python3 -m json.tool   # 指标 + 脱敏�
 | [docs/SECURITY.md](docs/SECURITY.md) | 威胁模型与默认防护 |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 现象 → 原因 → 解决 |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 目录结构、测试、新增模型、发布清单 |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | 如何提 issue 与 PR、CI 检查项、项目约定 |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | 版本历史 |
 | [docs/AUDIT.md](docs/AUDIT.md) | 1.2.0 缺陷审计（含复现方式） |
 
@@ -372,7 +373,7 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api tests
 ```
 
-499 个测试，全部离线运行——Gemini 协议在帧级别被模拟。CI 覆盖 Python 3.8–3.13、无第三方依赖的纯标准库运行、构建并安装 wheel 的校验、lint 与 Docker 构建。
+500 个测试，全部离线运行——Gemini 协议在帧级别被模拟。CI 覆盖 Python 3.8–3.13、无第三方依赖的纯标准库运行、构建并安装 wheel 的校验、lint 与 Docker 构建。
 
 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**
 
