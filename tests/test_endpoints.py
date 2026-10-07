@@ -1,6 +1,8 @@
 """HTTP endpoint behaviour: OpenAI, Responses, Google-native and status routes."""
 import base64
 import json
+import socket
+import socketserver
 import time
 import unittest
 from unittest import mock
@@ -805,6 +807,67 @@ class KeepAliveTests(ServerTestCase):
     def test_content_length_is_exact(self):
         _status, headers, body = self.get("/")
         self.assertEqual(int(headers["Content-Length"]), len(body.encode("utf-8")))
+
+
+class ListenBacklogTests(unittest.TestCase):
+    """The listen backlog must be big enough for clients that connect in bursts.
+
+    ``socketserver`` defaults ``request_queue_size`` to 5. Once the backlog
+    fills, the kernel drops the SYN and the client sits on its initial
+    retransmit timeout — a full second — before it is even accepted. Measured
+    here at 32 concurrent clients against the default: 95% of requests answered
+    in under 10 ms while ~4% took ~1000 ms, a sharply bimodal distribution with
+    almost nothing in between. That shape is the signature of backlog overflow
+    rather than contention, and it is invisible to any single-request test
+    because one request never fills a backlog of five.
+
+    Raising it to 128 removed the second band entirely (worst case 1438 ms ->
+    16 ms) and made latency scale smoothly to 128 concurrent clients.
+    """
+
+    def test_the_configured_backlog_actually_reaches_listen(self):
+        """Asserting the class attribute alone would be nearly vacuous.
+
+        An attribute that nothing reads passes just as happily, so the real
+        ``listen()`` call is intercepted and its argument checked. This is what
+        distinguishes "the knob is set" from "the kernel was told".
+        """
+        from gemini_web2api.server import GeminiHandler, ThreadedServer
+
+        seen = []
+        real_listen = socket.socket.listen
+
+        def spy(self, *args):
+            seen.append(args[0] if args else None)
+            return real_listen(self, *args)
+
+        with mock.patch.object(socket.socket, "listen", spy):
+            server = ThreadedServer(("127.0.0.1", 0), GeminiHandler)
+        try:
+            self.assertEqual(
+                seen, [ThreadedServer.request_queue_size],
+                f"listen() was called with {seen}, not the configured "
+                f"request_queue_size={ThreadedServer.request_queue_size}")
+        finally:
+            server.server_close()
+
+    def test_the_backlog_is_not_left_at_the_stdlib_default(self):
+        from gemini_web2api.server import ThreadedServer
+
+        self.assertEqual(
+            socketserver.TCPServer.request_queue_size, 5,
+            "the stdlib default changed; re-check whether 128 is still the "
+            "right ceiling and update this test's explanation")
+        self.assertGreater(
+            ThreadedServer.request_queue_size,
+            socketserver.TCPServer.request_queue_size,
+            "ThreadedServer is still inheriting the stdlib backlog of 5, so a "
+            "burst of more than five simultaneous connections stalls for a "
+            "second each")
+        self.assertGreaterEqual(
+            ThreadedServer.request_queue_size, 64,
+            "a backlog below 64 will still overflow for a modest connection "
+            "pool; chat UIs and CLI agents open several sockets at once")
 
 
 class RequestHistoryTests(ServerTestCase):

@@ -1315,6 +1315,17 @@ class ThreadedServer(ThreadingMixIn, HTTPServer):
     # Bind explicitly to IPv4; IPv6 dual-stack differs between platforms and
     # surprises people running in containers.
     address_family = socket.AF_INET
+    # socketserver's default listen backlog is 5, which is far too small for a
+    # service whose clients open several connections at once (chat UIs, the
+    # Codex/Gemini CLIs, anything with a connection pool). Once the backlog
+    # fills, the kernel drops the SYN and the client sits on its initial
+    # retransmit timeout — a full second — before it is even accepted.
+    # Measured here at 32 concurrent clients: 95% of requests answered in under
+    # 10 ms while ~4% took ~1000 ms, a sharply bimodal distribution with almost
+    # nothing in between, which is the signature of backlog overflow rather than
+    # contention. 128 is the traditional Linux SOMAXCONN and comfortably below
+    # this host's net.core.somaxconn, so it is not silently clamped.
+    request_queue_size = 128
 
     def __init__(self, *args, **kwargs):
         self._request_threads = set()

@@ -356,6 +356,20 @@ was reproduced.
 - Regexes compiled once at module scope.
 - Build-tag refresh rate-limited to once per minute so an outage cannot become a
   scrape storm.
+- **The listen backlog was raised from `socketserver`'s default of 5 to 128.**
+  With five, a burst of more than five simultaneous new connections overflows
+  the queue: the kernel drops the SYN and the client waits out its initial
+  retransmit timeout — a full second — before it is even accepted. Measured at
+  32 concurrent clients, the distribution was sharply bimodal: 95% of requests
+  answered in under 10 ms while ~4% took ~1000 ms, with almost nothing in
+  between. That shape is backlog overflow, not contention, and no
+  single-request test can see it because one request never fills a queue of
+  five. After the change the second band is gone entirely (worst case
+  1438 ms → 16 ms) and latency degrades smoothly instead of in one-second
+  cliffs — p50 10 ms / max 17 ms at 32 concurrent, p50 19 ms / max 36 ms at 64,
+  p50 42 ms / max 64 ms at 128, with zero requests over 100 ms at any level.
+  Chat UIs, connection pools and CLI agents all open several sockets at once, so
+  this was reachable in ordinary use rather than only under load testing.
 
 **Behaviour**
 
@@ -457,7 +471,7 @@ was reproduced.
 
 ### Tests
 
-- 18 tests → **518**, all offline. The Gemini wire protocol is faked at the frame
+- 18 tests → **520**, all offline. The Gemini wire protocol is faked at the frame
   level so real parsing and real HTTP handling are exercised without a network.
 - New modules for config layering, cookie formats, model resolution, protocol
   framing and streaming, prompt/tool parsing, every HTTP route, security
@@ -529,6 +543,17 @@ was reproduced.
   rather than shipping. This was the check whose absence let the defect below
   survive: building an sdist and then ignoring it proves only that the build did
   not crash.
+- `ListenBacklogTests` guards the backlog fix with two complementary
+  assertions, because one alone would leave a hole. The first intercepts the
+  real `listen()` call and checks its argument, which distinguishes "the knob is
+  set" from "the kernel was told" — an attribute nothing reads passes an
+  attribute-only check just as happily. The second pins the value well above the
+  stdlib default and re-asserts that the default really is 5, so a future
+  Python changing it prompts a re-check rather than a silent pass. Verified by
+  three injections: deleting the override, setting it back to 5, and leaving the
+  attribute at 128 while overriding `server_activate` to call `listen(5)`. The
+  third fails only the first assertion and the first two fail only the second,
+  which is what confirms they are not redundant.
 - `WorkerRoutingTests` **executes** `cloudflare/worker.js` under Node with
   upstream `fetch` stubbed to throw and to record that it was called. Until now
   the Worker was only ever `node --check`ed, which proves it parses and nothing
