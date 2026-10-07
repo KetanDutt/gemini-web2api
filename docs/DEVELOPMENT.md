@@ -45,6 +45,7 @@ tests/
   test_tools.py            prompt building and call parsing
   test_endpoints.py        every HTTP route
   test_security.py         auth, SSRF, limits, rate limiting
+  test_metrics.py          metrics, health probe, dashboard rendering
   test_packaging.py        build, shim, structure, docs presence
 docs/                      all documentation
 cloudflare/                independent Workers port

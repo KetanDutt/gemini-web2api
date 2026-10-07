@@ -245,7 +245,7 @@ was reproduced.
 
 ### Tests
 
-- 18 tests → **358**, all offline. The Gemini wire protocol is faked at the frame
+- 18 tests → **400**, all offline. The Gemini wire protocol is faked at the frame
   level so real parsing and real HTTP handling are exercised without a network.
 - New modules for config layering, cookie formats, model resolution, protocol
   framing and streaming, prompt/tool parsing, every HTTP route, security
