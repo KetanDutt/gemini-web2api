@@ -38,6 +38,7 @@ gemini_web2api/
   _healthcheck.py          container liveness probe (standalone)
 tests/
   support.py               server fixture, fake wire frames, SSE decoder
+  dashboard_render_assertions.js  run under Node against the console's escaper
   test_config.py           config layering and coercion
   test_cookies.py          every cookie format, auth-file adoption
   test_models.py           model table and resolution
@@ -139,6 +140,14 @@ touching these areas, keep the tests green:
 * `test_packaging.WindowsLauncherTests.*` — the launcher cannot execute on the
   Linux CI runner, so these are content guards. Each was verified to fail by
   injecting the violation it forbids.
+* `test_metrics.DashboardScriptTests` — the console's escaping functions are
+  *executed* under Node, not merely parsed. Model output is attacker-influenced
+  content assigned to `innerHTML`, so `node --check` is not enough. The
+  assertions live in `tests/dashboard_render_assertions.js`, which is
+  concatenated after the extracted functions so they share one scope; that file
+  is not standalone and `node --check` on it alone will fail on undefined names.
+  It is shipped in the sdist via `MANIFEST.in` — without it the test errors on a
+  machine that has Node.
 * `test_packaging.MarkdownLinkTests` — every relative link and heading anchor in
   the Markdown corpus resolves. Renaming a heading without updating what points
   at it fails here. If you add an anchor link, the slug is GitHub's: lowercase,

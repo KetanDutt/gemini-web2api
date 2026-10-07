@@ -108,6 +108,15 @@ was reproduced.
   nothing reads it at runtime and the image never runs `pip install .`, which is
   the only step that would need pyproject's `readme`.
 
+- `renderMd` in the web console threw on a non-string argument. `re.exec(src)`
+  coerces implicitly, but the `src.slice()` that follows does not, so a `null`
+  content would break the Chat tab. The server legitimately emits
+  `content: null` for an empty reply — one of the documented failure modes — so
+  this would have crashed the console in exactly the case where the user most
+  needs to see "(empty response)". Both call sites happened to guard with
+  `|| ''`, which is why it never surfaced; the function now coerces like `esc()`
+  already did, so it no longer depends on every caller remembering to.
+
 - `README_CN.md` did not link `docs/CONTRIBUTING.md`. The reachability guard
   only ever read `README.md`, so a translation that listed fewer documents than
   the original passed unnoticed — each page still works when linked, which is
@@ -396,7 +405,7 @@ was reproduced.
 
 ### Tests
 
-- 18 tests → **500**, all offline. The Gemini wire protocol is faked at the frame
+- 18 tests → **503**, all offline. The Gemini wire protocol is faked at the frame
   level so real parsing and real HTTP handling are exercised without a network.
 - New modules for config layering, cookie formats, model resolution, protocol
   framing and streaming, prompt/tool parsing, every HTTP route, security
@@ -421,6 +430,20 @@ was reproduced.
   phantom models, `(mode, think)` disagreements, and undocumented gaps all fail,
   and `node --check` guards the Worker's syntax (skipped when Node is absent).
   Each guard was verified to fail on an injected violation before being kept.
+- The console's JavaScript is now **executed**, not just parsed. `node --check`
+  proves syntax; it says nothing about whether the escaping works. 
+  `DashboardScriptTests` extracts the DOM-free portion of the dashboard's inline
+  `<script>` (`esc` through `renderMd`), concatenates
+  `tests/dashboard_render_assertions.js` after it so both share one scope, and
+  runs the pair under Node. It asserts that eight injection payloads — including
+  attribute and script-context breakouts, and the same payloads nested inside
+  inline code, bold and a heading — produce no live markup, that fenced blocks
+  are escaped rather than formatted, that legitimate Markdown still renders, and
+  that hostile input cannot throw. Model output is attacker-influenced content
+  that the console assigns to `innerHTML`, so this is the one part of the UI
+  where "it looks escaped" is not good enough. All three variants were verified
+  to fail on an injected violation: a no-op `esc`, formatting applied before
+  escaping, and the removed null coercion. Skipped when Node is absent.
 - `DockerfileTests` cross-checks the Dockerfile against `.dockerignore`
   **statically**, which is the only way to guard this without a container
   runtime: every `COPY` source must survive the ignore rules and exist in the

@@ -300,6 +300,103 @@ class HealthCheckTests(unittest.TestCase):
         self.assertNotIn("import gemini_web2api", source)
 
 
+def _dashboard_script():
+    """The inline <script> of a rendered dashboard."""
+    import re
+
+    state = {
+        "version": "1.2.0", "uptime_sec": 1.0,
+        "base_url": "http://localhost:8081/v1", "streaming": "httpx",
+        "api_keys": "1 configured", "cookie": "anonymous",
+        "default_model": "gemini-3.6-flash", "gemini_bl": "boq_x",
+        "proxy": None, "rate_limit": "disabled", "temporary_chats": False,
+        "requests_served": 0, "auth_enabled": True, "history_enabled": True,
+        "python": "3.11.2", "warnings": [], "models": [], "endpoints": [],
+    }
+    html = webui.render_dashboard(state).decode("utf-8")
+    return re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[0]
+
+
+def _pure_render_functions(script):
+    """Extract ``esc`` through ``renderMd``: the DOM-free part of the console.
+
+    These are the functions that turn attacker-influenced model output into HTML
+    assigned to ``innerHTML``. They reference neither ``document`` nor
+    ``localStorage``, which is what makes them runnable under bare Node.
+    """
+    start = script.index("const esc = ")
+    fn = script.index("function renderMd(src){", start)
+    depth = 0
+    i = script.index("{", fn)
+    while True:
+        if script[i] == "{":
+            depth += 1
+        elif script[i] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        i += 1
+    return script[start:i + 1]
+
+
+class DashboardScriptTests(unittest.TestCase):
+    """Execute the console's rendering functions under Node.
+
+    The dashboard is several hundred lines of inline JavaScript that no Python
+    test can exercise, and ``node --check`` only proves it parses. Model output
+    is attacker-influenced content that ends up in ``innerHTML``, so the
+    escaping contract is worth running rather than reading. Skipped when Node is
+    absent, matching the Worker's syntax guard.
+
+    The assertions live in ``tests/dashboard_render_assertions.js`` and are
+    concatenated *after* the extracted functions, so both share one scope —
+    Node's ``eval`` would not leak ``const`` bindings into the caller.
+    """
+
+    ASSERTIONS = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "dashboard_render_assertions.js")
+
+    def setUp(self):
+        import shutil
+
+        self.node = shutil.which("node")
+        if not self.node:
+            self.skipTest("node is not installed")
+        self.chunk = _pure_render_functions(_dashboard_script())
+
+    def _run_node(self, text, check_only=False):
+        import subprocess
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False,
+                                         encoding="utf-8") as handle:
+            handle.write(text)
+            path = handle.name
+        self.addCleanup(os.unlink, path)
+        argv = [self.node] + (["--check", path] if check_only else [path])
+        return subprocess.run(argv, capture_output=True, text=True, timeout=60)
+
+    def test_extraction_is_dom_free(self):
+        """Guards the extraction itself. If it ever pulled in DOM calls the run
+        below would fail for reasons unrelated to escaping."""
+        self.assertIn("const esc = ", self.chunk)
+        self.assertIn("function renderMd", self.chunk)
+        self.assertNotIn("document.", self.chunk)
+        self.assertNotIn("localStorage", self.chunk)
+
+    def test_extracted_chunk_parses(self):
+        result = self._run_node(self.chunk, check_only=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_escaping_survives_hostile_model_output(self):
+        with open(self.ASSERTIONS, encoding="utf-8") as handle:
+            assertions = handle.read()
+        result = self._run_node(self.chunk + "\n" + assertions)
+        self.assertEqual(
+            result.returncode, 0,
+            f"dashboard rendering assertions failed:\n{result.stdout}{result.stderr}")
+
+
 class DashboardTests(unittest.TestCase):
     def _state(self, **overrides):
         state = {

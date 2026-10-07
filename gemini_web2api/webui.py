@@ -380,6 +380,12 @@ function inlineMd(t){
   return s.replace(/\n/g, '<br>');
 }
 function renderMd(src){
+  // Coerced like esc() does, rather than relying on the call site's `|| ''`.
+  // `re.exec(src)` would coerce implicitly, but `src.slice()` below throws on a
+  // non-string, so a null `content` — which the server legitimately emits for an
+  // empty reply — would break the Chat tab exactly when the user most needs to
+  // see "(empty response)".
+  src = String(src ?? '');
   const out = [];
   const re = /```([a-zA-Z0-9_+\-]*)\n?([\s\S]*?)```/g;
   let last = 0, m;
