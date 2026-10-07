@@ -13,6 +13,7 @@ cumulative and end at `+Inf`.
 """
 
 import re
+import time
 import unittest
 from unittest import mock
 
@@ -377,16 +378,51 @@ class PrometheusEndpointTests(ServerTestCase):
         finally:
             self.CONFIG["api_keys"] = []
 
+    def _settled_request_count(self, timeout=3.0):
+        """The request counter, once no further increments are arriving.
+
+        Counters are incremented by `_record()` in a `finally`, *after* the
+        response body has been flushed, so a request made by an earlier test can
+        still land while this one is reading. An exact `+1` assertion therefore
+        cannot hold, and the first version of this test failed about one run in
+        twenty on the shared server. Settling first and then asserting a strict
+        increase guards the decision that matters — that `/metrics` is *not*
+        exempt from counting itself — without depending on timing.
+
+        Bounded, so a counter that stops moving still returns rather than
+        hanging until the CI timeout.
+        """
+        deadline = time.monotonic() + timeout
+        value = metrics.snapshot()["counters"]["requests"]
+        stable = 0
+        while time.monotonic() < deadline and stable < 3:
+            time.sleep(0.01)
+            current = metrics.snapshot()["counters"]["requests"]
+            stable = stable + 1 if current == value else 0
+            value = current
+        return value
+
     def test_metrics_records_its_own_request_after_answering(self):
         """The endpoint counts as a request like any other.
 
         Counting it is the honest choice: excluding it would make `/metrics`
         lie about the very traffic it reports.
+
+        Polled rather than read once, because `_record()` runs in a `finally`
+        *after* the response body is flushed: the client can have read a
+        complete response before the server thread has counted it. Reading once
+        made this test fail about one run in twenty. Same race, and same fix, as
+        `RequestHistoryTests._history_waiting_for`.
         """
-        before = metrics.snapshot()["counters"]["requests"]
+        before = self._settled_request_count()
         self.get("/metrics")
+        deadline = time.monotonic() + 3.0
         after = metrics.snapshot()["counters"]["requests"]
-        self.assertEqual(after, before + 1)
+        while after <= before and time.monotonic() < deadline:
+            time.sleep(0.01)
+            after = metrics.snapshot()["counters"]["requests"]
+        self.assertGreater(after, before,
+                           "the endpoint did not count itself")
 
     def test_the_reading_reflects_a_completed_request(self):
         """End-to-end: traffic shows up in the exposition, not just in /status."""

@@ -21,6 +21,7 @@ from . import __version__, jsonmode, prometheus
 from .config import CONFIG
 from .config import snapshot as config_snapshot
 from .gemini import HAS_HTTPX, generate, generate_stream, log
+from .gemini import pool_snapshot as cookie_pool_snapshot
 from .metrics import history as metrics_history
 from .metrics import inc, record_latency, record_request, record_status
 from .metrics import snapshot as metrics_snapshot
@@ -1389,6 +1390,9 @@ class GeminiHandler(BaseHTTPRequestHandler):
         payload["metrics"] = metrics
         payload["history"] = history
         payload["rate_limit"] = LIMITER.snapshot()
+        # Per-account health, so an operator can see which cookie is in use and
+        # which is resting. Never the cookie itself.
+        payload["credentials"] = cookie_pool_snapshot()
         payload["python"] = platform.python_version()
         payload["platform"] = platform.platform()
         return payload

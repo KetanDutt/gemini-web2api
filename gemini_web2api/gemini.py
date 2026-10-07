@@ -28,6 +28,7 @@ except ImportError:  # pragma: no cover - depends on the environment
     HAS_HTTPX = False
 
 from .config import CONFIG, apply_defaults, is_explicit
+from .credentials import DEFAULT_COOLDOWN_SEC, Credential, CredentialPool
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -46,6 +47,12 @@ class GeminiUpstreamError(RuntimeError):
 
 _ssl_ctx = None
 _cookie_cache = {"str": "", "sapisid": None, "mtime": None, "path": None}
+# The account pool. Rebuilt by `load_credentials()` whenever a configured file
+# changes on disk; empty when no cookie file is configured, in which case
+# `acquire()` returns None and the request path behaves exactly as before.
+_credentials = CredentialPool()
+_pool_cache = {"fingerprint": None}
+_pool_lock = threading.Lock()
 _httpx_client = None
 _client_lock = threading.Lock()
 _ssl_lock = threading.Lock()
@@ -266,61 +273,132 @@ def _parse_auth_file(content):
     return cookie_str, pairs.get("SAPISID") or None, overrides
 
 
-def load_cookie():
-    """Load ``(cookie_str, sapisid)`` from the configured cookie file.
+def configured_cookie_files():
+    """Every configured cookie file, primary first and de-duplicated.
 
-    Results are cached by ``(path, mtime, size)`` so a request does not touch
-    the filesystem more than once per change, and an edited cookie takes effect
-    without a restart.
+    ``cookie_file`` names the primary account and ``cookie_files`` adds the
+    rest, so an existing single-cookie configuration keeps working untouched
+    and adding a pool is purely additive.
     """
-    cookie_file = CONFIG.get("cookie_file")
-    if not cookie_file:
-        return "", None
-    if not os.path.exists(cookie_file):
-        if _cookie_cache["path"] != cookie_file:
-            log(f"Cookie file not found: {cookie_file}", "warning")
-            _cookie_cache["path"] = cookie_file
-        return "", None
+    primary = CONFIG.get("cookie_file")
+    extras = CONFIG.get("cookie_files") or []
+    if not isinstance(extras, (list, tuple)):
+        extras = []
+    files = []
+    for path in [primary] + list(extras):
+        if not isinstance(path, str) or not path:
+            continue
+        if path not in files:
+            files.append(path)
+    return files
 
-    try:
-        stat = os.stat(cookie_file)
-        fingerprint = (cookie_file, stat.st_mtime, stat.st_size)
-        cached = (_cookie_cache["path"], _cookie_cache["mtime"], len(_cookie_cache["str"]))
-        if _cookie_cache["str"] and cached[0] == cookie_file and _cookie_cache.get("fingerprint") == fingerprint:
-            return _cookie_cache["str"], _cookie_cache["sapisid"]
 
-        with open(cookie_file, encoding="utf-8") as f:
-            content = f.read()
+def _refresh_pool(files, fingerprint):
+    """Rebuild the credential pool, or return early when nothing changed."""
+    with _pool_lock:
+        if _pool_cache["fingerprint"] == fingerprint and len(_credentials):
+            return
+        built = []
+        for index, path in enumerate(files):
+            if not os.path.exists(path):
+                if _cookie_cache["path"] != path:
+                    log(f"Cookie file not found: {path}", "warning")
+                    _cookie_cache["path"] = path
+                continue
+            try:
+                with open(path, encoding="utf-8") as f:
+                    content = f.read()
+            except OSError as exc:
+                log(f"Cookie load error in {os.path.basename(path)}: {exc}", "error")
+                continue
+            cookie_str, sapisid, overrides = _parse_auth_file(content)
+            if not cookie_str:
+                log(f"No cookie found in {os.path.basename(path)}", "warning")
+                continue
+            # The primary file keeps applying its overrides globally, which is
+            # what single-cookie deployments already relied on. Secondary files
+            # must not: `apply_defaults` is global, so the last file read would
+            # silently win and every request would use one account's settings.
+            if index == 0 and overrides:
+                applied = apply_defaults(overrides, source=os.path.basename(path))
+                if applied:
+                    log(f"Applied from {os.path.basename(path)}: {', '.join(applied)}")
+            if cookie_str and not sapisid:
+                log(f"Cookie in {os.path.basename(path)} has no SAPISID — "
+                    "authenticated Pro routing will not be available for it.",
+                    "warning")
+            built.append(Credential(
+                cookie=cookie_str,
+                sapisid=sapisid,
+                auth_user=overrides.get("auth_user"),
+                xsrf_token=overrides.get("xsrf_token"),
+                source=path,
+            ))
+        _credentials.replace(
+            built, cooldown_sec=CONFIG.get("cookie_cooldown_sec") or DEFAULT_COOLDOWN_SEC)
+        _pool_cache["fingerprint"] = fingerprint
+        if len(built) > 1:
+            log(f"Cookie pool: {len(built)} accounts, rotating on 429")
 
-        cookie_str, sapisid, overrides = _parse_auth_file(content)
-        if overrides:
-            applied = apply_defaults(overrides, source=os.path.basename(cookie_file))
-            if applied:
-                log(f"Applied from {os.path.basename(cookie_file)}: {', '.join(applied)}")
 
-        _cookie_cache.update({
-            "str": cookie_str,
-            "sapisid": sapisid,
-            "path": cookie_file,
-            "mtime": stat.st_mtime,
-            "fingerprint": fingerprint,
-        })
-        if cookie_str and not sapisid:
-            log("Cookie loaded but SAPISID is absent — authenticated Pro routing "
-                "will not be available.", "warning")
-        return cookie_str, sapisid
-    except OSError as exc:
-        log(f"Cookie load error: {exc}", "error")
-        return _cookie_cache["str"], _cookie_cache["sapisid"]
-    except Exception as exc:  # pragma: no cover - defensive
-        log(f"Cookie load error: {exc}", "error")
-        return _cookie_cache["str"], _cookie_cache["sapisid"]
+def load_credentials():
+    """Return the current list of credentials, re-reading changed files."""
+    files = configured_cookie_files()
+    if not files:
+        with _pool_lock:
+            if _pool_cache["fingerprint"] is not None:
+                _credentials.replace([])
+                _pool_cache["fingerprint"] = None
+        return []
+    fingerprint = []
+    for path in files:
+        try:
+            stat = os.stat(path)
+            fingerprint.append((path, stat.st_mtime, stat.st_size))
+        except OSError:
+            fingerprint.append((path, None, None))
+    _refresh_pool(files, tuple(fingerprint))
+    return _credentials.credentials()
+
+
+def load_cookie():
+    """Load ``(cookie_str, sapisid)`` for the primary account.
+
+    Kept as the single-account accessor: existing callers and tests use it, and
+    it is the credential a deployment configured with one cookie file has.
+    """
+    pool = load_credentials()
+    if pool:
+        primary = pool[0]
+        cookie_str, sapisid = primary.cookie, primary.sapisid
+    else:
+        cookie_str, sapisid = "", None
+    _cookie_cache.update({
+        "str": cookie_str,
+        "sapisid": sapisid,
+        "path": (CONFIG.get("cookie_file") or ""),
+        "mtime": None,
+    })
+    return cookie_str, sapisid
+
+
+def pool_snapshot():
+    """Per-credential health for ``/status``. Never exposes a cookie.
+
+    Loading first means the first ``/status`` poll after startup reports the
+    accounts that are configured, rather than an empty pool.
+    """
+    load_credentials()
+    return _credentials.snapshot()
 
 
 def reset_cookie_cache():
-    """Drop the cached cookie so the next request re-reads the file."""
+    """Drop the cached cookie so the next request re-reads the files."""
     _cookie_cache.update({"str": "", "sapisid": None, "mtime": None,
                           "path": None, "fingerprint": None})
+    with _pool_lock:
+        _credentials.replace([])
+        _pool_cache["fingerprint"] = None
 
 
 def make_sapisidhash(sapisid):
@@ -330,20 +408,37 @@ def make_sapisidhash(sapisid):
     return f"SAPISIDHASH {ts}_{digest}"
 
 
-def _account_prefix():
-    """Return the Gemini account path prefix for non-default Google accounts."""
-    auth_user = CONFIG.get("auth_user")
+def _account_prefix(credential=None):
+    """Return the Gemini account path prefix for non-default Google accounts.
+
+    Read from the credential when there is one, because in a pool each account
+    has its own index: sending account A's `/u/1` with account B's cookies
+    addresses the wrong account, or none.
+    """
+    auth_user = None
+    if credential is not None:
+        auth_user = credential.auth_user
+    if auth_user is None or auth_user == "":
+        auth_user = CONFIG.get("auth_user")
     if auth_user is None or auth_user == "":
         return ""
     return f"/u/{auth_user}"
 
 
-def _build_headers():
-    # load_cookie() may adopt auth_user/xsrf_token/gemini_bl from a
-    # gemini-auth.json export, so it has to run before anything reads them —
-    # otherwise the very first request after startup is built from defaults.
-    cookie_str, sapisid = load_cookie()
-    prefix = _account_prefix()
+def _build_headers(credential=None):
+    """Headers for one request, for ``credential`` or the primary account.
+
+    When no credential is passed the primary account is used, which is what a
+    single-cookie deployment has — and ``load_credentials()`` must run first
+    because it is what adopts auth_user/xsrf_token/gemini_bl from a
+    gemini-auth.json export.
+    """
+    if credential is None:
+        pool = load_credentials()
+        credential = pool[0] if pool else None
+    cookie_str = credential.cookie if credential is not None else ""
+    sapisid = credential.sapisid if credential is not None else None
+    prefix = _account_prefix(credential)
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
         "Origin": GEMINI_ORIGIN,
@@ -351,8 +446,11 @@ def _build_headers():
         "X-Same-Domain": "1",
         "User-Agent": USER_AGENT,
     }
-    if prefix:
-        headers["X-Goog-AuthUser"] = str(CONFIG["auth_user"])
+    auth_user = (credential.auth_user if credential is not None else None)
+    if auth_user is None or auth_user == "":
+        auth_user = CONFIG.get("auth_user")
+    if prefix and auth_user not in (None, ""):
+        headers["X-Goog-AuthUser"] = str(auth_user)
     if cookie_str:
         headers["Cookie"] = cookie_str
     if sapisid:
@@ -371,7 +469,8 @@ def _apply_chat_persistence_flags(inner):
         inner[41] = [2]
 
 
-def _build_payload(prompt, model_id, think_mode, file_refs=None, extra_fields=None):
+def _build_payload(prompt, model_id, think_mode, file_refs=None, extra_fields=None,
+                   credential=None):
     from .models import PAYLOAD_SLOTS
 
     # See _build_headers: the auth file can supply the XSRF token, and it is
@@ -407,15 +506,19 @@ def _build_payload(prompt, model_id, think_mode, file_refs=None, extra_fields=No
                 inner[index] = value
     outer = [None, json.dumps(inner)]
     params = {"f.req": json.dumps(outer)}
-    if CONFIG.get("xsrf_token"):
-        params["at"] = CONFIG["xsrf_token"]
+    # The `at` token belongs to the account, so a pool sends the credential's
+    # own when the exported auth file carried one and falls back to the global
+    # value otherwise (which is all a single-cookie deployment has).
+    xsrf = getattr(credential, "xsrf_token", None) or CONFIG.get("xsrf_token")
+    if xsrf:
+        params["at"] = xsrf
     return urllib.parse.urlencode(params)
 
 
-def _get_url(reqid=None):
+def _get_url(reqid=None, credential=None):
     if reqid is None:
         reqid = int(time.time()) % 1000000
-    prefix = _account_prefix()
+    prefix = _account_prefix(credential)
     return (
         f"{GEMINI_ORIGIN}{prefix}/_/BardChatUi/data/"
         "assistant.lamda.BardFrontendService/StreamGenerate"
@@ -456,8 +559,12 @@ def fetch_latest_bl(timeout=8):
         return None
 
 
-def _cookie_headers():
-    cookie_str, sapisid = load_cookie()
+def _cookie_headers(credential=None):
+    if credential is None:
+        pool = load_credentials()
+        credential = pool[0] if pool else None
+    cookie_str = credential.cookie if credential is not None else ""
+    sapisid = credential.sapisid if credential is not None else None
     headers = {}
     if cookie_str:
         headers["Cookie"] = cookie_str
@@ -636,16 +743,61 @@ if HAS_HTTPX:
 _HTTP_ERRORS = tuple(_HTTP_ERRORS)
 
 
+def _next_credential():
+    """The credential to use for the next attempt, or ``None`` if none can serve.
+
+    Rotation needs no memory of which account just failed: the failure cooled
+    that account, so `acquire()` skips it, and handing a credential out advances
+    the round robin past it. That is what makes a 429 a retry on a healthy
+    account rather than a repeat of the one that is throttled.
+    """
+    credential = _credentials.acquire()
+    if credential is None and _credentials.rotating:
+        log("No credential is currently available; all are cooling down", "warning")
+    return credential
+
+
+def _rotate(credential, status, message):
+    """Cool a failed credential and report whether a different one should be tried.
+
+    False for a single-account deployment: there is nothing to rotate to, and
+    the retry loop's existing sleep-and-retry behaviour is what already shipped.
+    """
+    if not _credentials.rotating:
+        return False
+    if not _credentials.report_status(credential, status, message):
+        return False
+    log(f"Account {credential.label()} is unavailable (HTTP {status}); "
+        f"trying another credential", "warning")
+    return True
+
+
 def generate(prompt, model_id, think_mode, file_refs=None, extra_fields=None):
     """Non-streaming generation with retry. Returns the final text."""
-    body = _build_payload(prompt, model_id, think_mode, file_refs, extra_fields).encode()
-    headers = _build_headers()
     attempts = max(1, int(CONFIG.get("retry_attempts", 3)))
     delay = CONFIG.get("retry_delay_sec", 2)
     last_err = None
+    credential = _next_credential()
 
     for attempt in range(attempts):
-        url = _get_url()
+        if credential is None and _credentials.rotating:
+            # Every account is cooling. Failing fast with the real reason beats
+            # sending an unauthenticated request, which would spend a call to
+            # get a less informative error. Note the `rotating` guard: an empty
+            # pool means no cookie file is configured at all, which is the
+            # anonymous path whose retry behaviour must not change.
+            if last_err is None:
+                last_err = GeminiUpstreamError(
+                    "every configured account is rate limited or rejected; "
+                    "retry shortly", status=429)
+            break
+        # Built per attempt from this attempt's credential: a pool sends a
+        # different account's cookies on failover, so headers and URL cannot be
+        # computed once outside the loop.
+        body = _build_payload(prompt, model_id, think_mode, file_refs,
+                              extra_fields, credential).encode()
+        headers = _build_headers(credential)
+        url = _get_url(credential=credential)
         try:
             client = _get_httpx_client()
             if client is not None:
@@ -655,13 +807,19 @@ def generate(prompt, model_id, think_mode, file_refs=None, extra_fields=None):
                     last_err = GeminiUpstreamError("HTTP 405 from upstream", status=405)
                     continue
                 resp.raise_for_status()
+                _credentials.report_success(credential)
                 return extract_response_text(resp.text)
             req = urllib.request.Request(url, data=body, headers=headers, method="POST")
             raw = _urlopen(req).read().decode("utf-8", errors="replace")
+            _credentials.report_success(credential)
             return extract_response_text(raw)
         except _HTTP_ERRORS as exc:
             message, status = _describe_http_error(exc)
             last_err = GeminiUpstreamError(message, status=status)
+            if _rotate(credential, status, message):
+                # No sleep: the point is to move to a healthy account now.
+                credential = _next_credential()
+                continue
             if status == 405 and update_bl_if_needed():
                 log("Retrying with refreshed bl…")
                 continue
@@ -712,7 +870,6 @@ def generate_stream(prompt, model_id, think_mode, file_refs=None, extra_fields=N
             yield text
         return
 
-    body = _build_payload(prompt, model_id, think_mode, file_refs, extra_fields)
     client = _get_httpx_client()
     attempts = max(1, int(CONFIG.get("retry_attempts", 3)))
     delay = CONFIG.get("retry_delay_sec", 2)
@@ -720,10 +877,24 @@ def generate_stream(prompt, model_id, think_mode, file_refs=None, extra_fields=N
     emitted = ""       # text already handed to the caller
     seen_longest = ""  # longest cumulative frame observed
     last_err = None
+    credential = _next_credential()
 
     for attempt in range(attempts):
-        headers = _build_headers()
-        url = _get_url()
+        if credential is None and _credentials.rotating:
+            # Every account is cooling. Failing fast with the real reason beats
+            # sending an unauthenticated request, which would spend a call to
+            # get a less informative error. Note the `rotating` guard: an empty
+            # pool means no cookie file is configured at all, which is the
+            # anonymous path whose retry behaviour must not change.
+            if last_err is None:
+                last_err = GeminiUpstreamError(
+                    "every configured account is rate limited or rejected; "
+                    "retry shortly", status=429)
+            break
+        body = _build_payload(prompt, model_id, think_mode, file_refs,
+                              extra_fields, credential)
+        headers = _build_headers(credential)
+        url = _get_url(credential=credential)
         try:
             with client.stream("POST", url, content=body, headers=headers) as resp:
                 if resp.status_code == 405:
@@ -756,19 +927,25 @@ def generate_stream(prompt, model_id, think_mode, file_refs=None, extra_fields=N
                         yield delta
                 return
         except Exception as exc:
+            status = None
+            message = None
             if isinstance(exc, _HTTP_ERRORS):
                 message, status = _describe_http_error(exc)
                 last_err = GeminiUpstreamError(message, status=status)
-                if status == 405 and update_bl_if_needed():
-                    continue
             else:
                 last_err = exc
             if emitted:
                 # Bytes already went to the client; retrying would duplicate
                 # them. Surface the failure so the handler can terminate the
-                # stream cleanly instead of silently truncating it.
+                # stream cleanly instead of silently truncating it. Checked
+                # before rotating, because a rotation is still a retry.
                 log(f"Stream failed after {len(emitted)} chars: {last_err}", "error")
                 raise last_err from None
+            if status is not None and _rotate(credential, status, message):
+                credential = _next_credential()
+                continue
+            if status == 405 and update_bl_if_needed():
+                continue
             if attempt < attempts - 1:
                 log(f"Stream retry {attempt + 1}/{attempts}: {last_err}", "warning")
                 time.sleep(delay)

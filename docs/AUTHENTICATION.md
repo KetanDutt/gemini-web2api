@@ -200,6 +200,46 @@ With `auth_user` set, requests also carry `X-Goog-AuthUser: <n>` and use the
 
 With `xsrf_token` set, it is sent as the `at` form field.
 
+### Multiple accounts and rate-limit failover
+
+Google rate limits each account on its own, so with one cookie a 429 is the whole
+deployment failing until the limit expires. Name extra accounts and the proxy will
+rotate:
+
+```json
+{
+  "cookie_file": "/data/primary.json",
+  "cookie_files": ["/data/second.json", "/data/third.json"]
+}
+```
+
+The primary is whatever `cookie_file` names; `cookie_files` adds to it, so a
+single-cookie configuration behaves exactly as before. Each file is read through
+the same parser as the primary, including hot reload: re-exporting one account
+refreshes that account alone, with no restart.
+
+| Upstream status | What happens |
+| --- | --- |
+| `429 Too Many Requests` | That account rests for `cookie_cooldown_sec` (default 60s) and the request is retried immediately on the next account. No retry delay — the point is to move now. |
+| `401` / `403` | The cookie is stale rather than throttled, so it rests for 15 minutes. Re-export it; it is picked up automatically. |
+| Anything else (`5xx`, timeouts, `405`) | Not an account problem, so nothing rotates. A `5xx` would otherwise burn every account in turn during one outage and then blame the last one. |
+| Every account resting | The request fails immediately with `429` and a message saying so, rather than spending a call on an unauthenticated attempt to earn a less informative error. |
+
+**Rotation engages only above one credential.** With a single cookie the pool
+always hands back that cookie and never rests it, so retry behaviour is
+byte-for-byte what it was before this feature existed — that is a test-enforced
+guarantee, not a hope.
+
+Each account is addressed with its **own** account index when its auth file
+supplies `auth_user`. Sending account A's `/u/1` with account B's cookies would
+authenticate as the wrong account, which is the subtle failure this exists to
+avoid. `gemini_bl` stays global: it identifies Google's frontend build, not an
+account.
+
+Per-account health appears in `/status` under `credentials` — source, whether a
+SAPISID is present, cooldown remaining, last error and use count. Never the
+cookie, and never a path to it beyond the file the operator configured.
+
 ### Temporary chats
 
 ```json
@@ -230,7 +270,9 @@ them can act as you.
 * Never put a cookie in a URL, a log line, an issue report or a container
   environment variable that shows up in `docker inspect`.
 * `/status` redacts secrets: `api_keys` becomes `"2 configured"`, `xsrf_token`
-  becomes `"set"`. No endpoint returns a cookie.
+  becomes `"set"`. No endpoint returns a cookie. The `credentials` section
+  reports each account's health without serialising a cookie at all — the
+  pool's snapshot has no field a cookie could travel in.
 * In Docker, mount the file read-only rather than baking it into an image:
 
   ```bash

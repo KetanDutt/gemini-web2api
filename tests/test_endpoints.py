@@ -888,6 +888,32 @@ class RequestHistoryTests(ServerTestCase):
         self.assertEqual(status, 200)
         return body["history"]
 
+    def _history_waiting_for(self, path, timeout=3.0):
+        """History entries, retried until ``path`` has been recorded.
+
+        History is appended by ``_finish_history()`` in a ``finally`` — that is,
+        *after* the response body has been flushed. A client can therefore have
+        read a complete response and issued its next request before the server
+        thread reaches that line, so reading ``/status`` immediately after a
+        request can legitimately miss that request's own entry.
+
+        This made the suite flaky: roughly one run in twenty failed on a
+        ``StopIteration`` here. The flake is a property of the design, not a bug
+        in it — the entry is written last precisely so its duration covers the
+        whole exchange, which is why ``/status`` reports 4060ms where the old
+        code reported 0.6ms. The test was wrong to assume otherwise, so it waits.
+
+        Bounded, so a genuine failure to record still fails here rather than
+        hanging until the CI timeout.
+        """
+        deadline = time.monotonic() + timeout
+        entries = self._history()
+        while (not any(e["path"] == path for e in entries)
+               and time.monotonic() < deadline):
+            time.sleep(0.01)
+            entries = self._history()
+        return entries
+
     def test_status_exposes_history(self):
         self.get("/health")
         entries = self._history()
@@ -897,7 +923,8 @@ class RequestHistoryTests(ServerTestCase):
 
     def test_entry_shape(self):
         self.get("/health")
-        entry = next(e for e in self._history() if e["path"] == "/health")
+        entry = next(e for e in self._history_waiting_for("/health")
+                     if e["path"] == "/health")
         for field in ("ts", "id", "method", "path", "status", "model", "ms", "client"):
             self.assertIn(field, entry, f"history entry is missing {field!r}")
         self.assertEqual(entry["method"], "GET")
@@ -914,7 +941,8 @@ class RequestHistoryTests(ServerTestCase):
 
     def test_errors_are_recorded(self):
         self.get("/definitely-not-a-route")
-        statuses = {e["path"]: e["status"] for e in self._history()}
+        statuses = {e["path"]: e["status"]
+                    for e in self._history_waiting_for("/definitely-not-a-route")}
         self.assertEqual(statuses.get("/definitely-not-a-route"), 404)
 
     def test_resolved_model_is_recorded(self):
@@ -922,7 +950,8 @@ class RequestHistoryTests(ServerTestCase):
         with mock.patch("gemini_web2api.server.generate", return_value="ok"):
             self.post_json("/v1/chat/completions",
                            dict(CHAT_BODY, model="gemini-9.9-does-not-exist"))
-        entry = next(e for e in self._history() if e["path"] == "/v1/chat/completions")
+        entry = next(e for e in self._history_waiting_for("/v1/chat/completions")
+                     if e["path"] == "/v1/chat/completions")
         self.assertEqual(entry["model"], "gemini-3.6-flash")
 
     def test_history_max_zero_disables_it(self):
@@ -977,7 +1006,8 @@ class RequestHistoryTests(ServerTestCase):
         with mock.patch("gemini_web2api.server.generate_stream", slow_stream):
             self.post("/v1/chat/completions", dict(CHAT_BODY, stream=True))
 
-        entry = next(e for e in self._history() if e["path"] == "/v1/chat/completions")
+        entry = next(e for e in self._history_waiting_for("/v1/chat/completions")
+                     if e["path"] == "/v1/chat/completions")
         self.assertGreaterEqual(entry["ms"], 250.0,
                                 f"stream duration looks like time-to-first-byte: {entry['ms']}ms")
         self.assertEqual(entry["status"], 200)
@@ -992,7 +1022,8 @@ class RequestHistoryTests(ServerTestCase):
 
         with mock.patch("gemini_web2api.server.generate", slow_generate):
             self.post_json("/v1/chat/completions", CHAT_BODY)
-        entry = next(e for e in self._history() if e["path"] == "/v1/chat/completions")
+        entry = next(e for e in self._history_waiting_for("/v1/chat/completions")
+                     if e["path"] == "/v1/chat/completions")
         self.assertGreaterEqual(entry["ms"], 200.0)
 
     def test_history_is_written_even_when_the_stream_fails(self):
@@ -1002,7 +1033,8 @@ class RequestHistoryTests(ServerTestCase):
         with mock.patch("gemini_web2api.server.generate_stream",
                         side_effect=RuntimeError("upstream went away")):
             self.post("/v1/chat/completions", dict(CHAT_BODY, stream=True))
-        entries = [e for e in self._history() if e["path"] == "/v1/chat/completions"]
+        entries = [e for e in self._history_waiting_for("/v1/chat/completions")
+                   if e["path"] == "/v1/chat/completions"]
         self.assertEqual(len(entries), 1, f"expected exactly one entry, got {entries}")
 
     def test_request_is_not_recorded_twice(self):
@@ -1012,7 +1044,8 @@ class RequestHistoryTests(ServerTestCase):
         with mock.patch("gemini_web2api.server.generate_stream") as stream:
             stream.return_value = iter(["ok"])
             self.post("/v1/chat/completions", dict(CHAT_BODY, stream=True))
-        entries = [e for e in self._history() if e["path"] == "/v1/chat/completions"]
+        entries = [e for e in self._history_waiting_for("/v1/chat/completions")
+                   if e["path"] == "/v1/chat/completions"]
         self.assertEqual(len(entries), 1)
         _s, _h, payload = self.get_json("/status")
         self.assertEqual(payload["metrics"]["counters"]["requests"], len(payload["history"]))
@@ -1046,7 +1079,7 @@ class RequestHistoryTests(ServerTestCase):
         like /health legitimately appear in the documented endpoint list.
         """
         self.get("/health")
-        entries = self._history()
+        entries = self._history_waiting_for("/health")
         self.assertTrue(entries, "expected /status to expose history first")
         self.assertTrue(any("client" in e for e in entries))
 

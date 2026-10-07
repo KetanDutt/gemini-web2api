@@ -45,6 +45,8 @@ From the environment, `api_keys` accepts a comma list (`a,b,c`), a pipe list
 | Key | Default | Environment | CLI | Description |
 |---|---|---|---|---|
 | `cookie_file` | `null` | `GEMINI_WEB2API_COOKIE_FILE` | `--cookie-file` | Path to a cookie file, `gemini-auth.json`, or a Netscape cookie jar. |
+| `cookie_files` | `[]` | `GEMINI_WEB2API_COOKIE_FILES` | — | **Additional** accounts to rotate through when the primary one is rate limited. See [Multiple accounts](#multiple-accounts). |
+| `cookie_cooldown_sec` | `60` | `GEMINI_WEB2API_COOKIE_COOLDOWN_SEC` | — | How long a rate-limited account sits out before it is tried again. A rejected one (`401`/`403`) always waits longer. |
 | `auth_user` | `null` | `GEMINI_WEB2API_AUTH_USER` | — | Google account index for `/u/<n>/` URLs. |
 | `xsrf_token` | `null` | `GEMINI_WEB2API_XSRF_TOKEN` | — | Sent as the `at` form field. Required for authenticated requests. |
 | `gemini_bl` | pinned build tag | `GEMINI_WEB2API_GEMINI_BL` | `--gemini-bl` | Frontend build tag. Setting this **disables auto-refresh**. |
@@ -102,6 +104,50 @@ Because entries include client addresses, history is served only from the
 auth-gated `/status` endpoint — it is not embedded in the public dashboard
 render. Set `history_max: 0` if you would rather not retain client addresses at
 all.
+
+## Multiple accounts
+
+A Google account gets rate limited on its own, and with one cookie that is the
+whole deployment failing until the limit expires — every request returns 429,
+even though the operator may have other accounts to use.
+
+Configure a pool by naming extra cookie files:
+
+```json
+{
+  "cookie_file": "/data/primary.json",
+  "cookie_files": ["/data/second.json", "/data/third.json"]
+}
+```
+
+Behaviour:
+
+* Requests rotate round-robin across the pool. The primary is `cookie_file`;
+  `cookie_files` adds to it, so a single-cookie configuration is unchanged.
+* A `429` puts that account on cooldown (`cookie_cooldown_sec`, default 60s) and
+  the request is retried on the *next* account immediately, without the retry
+  delay — the point is to move to a healthy account now.
+* A `401` or `403` means the cookie is stale rather than throttled, so it cools
+  down for 15 minutes. A rejected cookie does not recover on its own; re-run the
+  cookie export and it is picked up automatically, with no restart.
+* **Rotation engages only with more than one credential.** With a single cookie
+  the pool always returns it and never cools it down, so retry behaviour is
+  byte-for-byte what it was before.
+* If *every* account is cooling, the request fails immediately with `429` and a
+  message saying so. Sending an unauthenticated request instead would spend a
+  call to get a less informative error.
+* Each account is addressed with its **own** `auth_user` index when its auth
+  file supplies one, because sending account A's `/u/1` with account B's cookies
+  addresses the wrong account.
+
+Per-account state is visible in `/status` under `credentials` — source, whether
+it has a SAPISID, cooldown remaining and last error. Never the cookie itself.
+
+Two limits worth knowing. The build tag (`gemini_bl`) is shared, not per-account:
+it identifies Google's frontend build, not an account. And the `xsrf_token` is
+taken from the account's own auth file when it carries one, falling back to the
+global setting — an auth file that omits it while a global value is set will send
+the global one.
 
 ## Configuration sources
 

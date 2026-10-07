@@ -331,6 +331,17 @@ Requires an API key when keys are configured.
     "latency_histogram_ms": {"50": 0, "100": 0, "…": 0, "inf": 3},
     "models": {"gemini-3.6-flash": {"requests": 500, "avg_ms": 1830.1, "max_ms": 9204.7}}
   },
+  "credentials": {
+    "size": 2, "rotating": true, "available": 1, "cooldown_sec": 60,
+    "entries": [
+      {"source": "/data/primary.json", "has_sapisid": true, "auth_user": "0",
+       "usable": false, "cooldown_remaining_sec": 41.2, "uses": 128,
+       "last_error": "429"},
+      {"source": "/data/second.json", "has_sapisid": true, "auth_user": null,
+       "usable": true, "cooldown_remaining_sec": 0.0, "uses": 0,
+       "last_error": null}
+    ]
+  },
   "history": [
     {"ts": 1760000000.1, "id": "9f2c1ab7d403", "method": "POST",
      "path": "/v1/chat/completions", "status": 200,
@@ -338,6 +349,12 @@ Requires an API key when keys are configured.
   ]
 }
 ```
+
+`credentials` describes the cookie pool: one entry per configured account, with
+its source, whether a `SAPISID` is present, its use count, cooldown remaining and
+last error. No cookie is ever serialised. With a single cookie, `rotating` is
+`false` and the entry is always `usable` — see
+[AUTHENTICATION.md](AUTHENTICATION.md#multiple-accounts-and-rate-limit-failover).
 
 `history` is the request log behind the dashboard's **Activity** tab: the most
 recent `history_max` requests (default 200, capped at 1000), newest first. Set

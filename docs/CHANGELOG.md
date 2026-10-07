@@ -399,6 +399,32 @@ was reproduced.
   there is one global set of buckets, and `docs/API.md` says so along with the
   per-process caveat.
 
+- **Multiple accounts with rate-limit failover** — `cookie_files` names extra
+  accounts; a `429` rests the throttled one (`cookie_cooldown_sec`, default 60s)
+  and retries on the next immediately. This is the one feature here that attacks
+  the documented *"Google rate limits apply"* limitation rather than restating
+  it: with a single cookie, a `429` is the whole deployment failing until the
+  limit expires.
+
+  A `401`/`403` rests for 15 minutes instead of 60 seconds, because a stale
+  cookie does not recover on its own and reusing it spends a real upstream call
+  per request on an account that cannot answer. Anything else — a `5xx`, a
+  timeout, a `405` — rotates *nothing*: during an outage, rotating would burn
+  every account in turn and then report the last one as broken.
+
+  **Rotation engages only above one credential.** With a single cookie the pool
+  always returns that cookie and never rests it, so retry behaviour is
+  byte-for-byte what it was before — a test-enforced guarantee, because the
+  alternative is a silent change to the request path of every existing
+  deployment. Each account carries its own `auth_user` index and `xsrf_token`
+  when its auth file supplies them: sending account A's `/u/1` with account B's
+  cookies would authenticate as the wrong account. `gemini_bl` stays global
+  because it identifies Google's frontend build, not an account.
+
+  `/status` gains a `credentials` section — per account, its source, whether a
+  SAPISID is present, cooldown remaining, uses and last error. No field can
+  carry a cookie, and a test asserts it.
+
 ### Changed
 
 **Performance**
@@ -553,7 +579,7 @@ was reproduced.
 
 ### Tests
 
-- 18 tests → **594**, all offline. The Gemini wire protocol is faked at the frame
+- 18 tests → **630**, all offline. The Gemini wire protocol is faked at the frame
   level so real parsing and real HTTP handling are exercised without a network.
 - New modules for config layering, cookie formats, model resolution, protocol
   framing and streaming, prompt/tool parsing, every HTTP route, security

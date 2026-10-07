@@ -34,6 +34,7 @@
 - **可选鉴权** —— 默认开放；配置密钥后支持 Bearer / `x-api-key` / `x-goog-api-key`，并可选限流
 - **自愈能力** —— 自动刷新 Google 的构建标签（`bl`），前端改版不会导致服务失效
 - **Prometheus 指标** —— `GET /metrics` 以文本暴露格式导出计数器、状态码与延迟直方图，可直接接入既有监控
+- **多账号轮换** —— 通过 `cookie_files` 配置多个 Google 账号，被限流（`429`）的账号进入冷却，请求立即改由其他账号完成；单 cookie 部署行为完全不变
 - **Web 控制台** —— 打开 `http://localhost:8081/`，含对话 Playground、实时状态、请求活动、模型选择与可直接粘贴的客户端配置
 - **生产级打包** —— 非 root Docker 镜像、健康检查、环境变量配置、优雅停机、CI
 - **Windows 一键启动** —— 双击 `start.bat` 即可创建虚拟环境、安装依赖、生成安全的 `config.json` 并启动服务
@@ -375,7 +376,7 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api tests
 ```
 
-594 个测试，全部离线运行——Gemini 协议在帧级别被模拟。CI 覆盖 Python 3.8–3.13、无第三方依赖的纯标准库运行、构建并安装 wheel 的校验、lint 与 Docker 构建。
+630 个测试，全部离线运行——Gemini 协议在帧级别被模拟。CI 覆盖 Python 3.8–3.13、无第三方依赖的纯标准库运行、构建并安装 wheel 的校验、lint 与 Docker 构建。
 
 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**
 

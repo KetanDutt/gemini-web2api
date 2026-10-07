@@ -5,6 +5,8 @@
   "default_model": "gemini-3.6-flash",
 
   "cookie_file": null,
+  "cookie_files": [],
+  "cookie_cooldown_sec": 60,
   "auth_user": null,
   "xsrf_token": null,
   "gemini_bl": "boq_assistant-bard-web-server_20260716.08_p0",

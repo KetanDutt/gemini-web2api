@@ -206,6 +206,30 @@ touching these areas, keep the tests green:
   alert. Six injections confirmed the coverage: raw buckets, milliseconds,
   unescaped labels, a missing `+Inf` bucket, a counter renamed without `_total`,
   and a counter left without help text.
+* `test_credentials` — the interesting half of rotation is the half that is
+  *absent*. A single-cookie deployment takes the same code path it always did,
+  and "the same path" is not something a passing integration test proves on its
+  own, so the suite pins it from both ends: an empty pool and a one-entry pool
+  each assert that `acquire()` returns the credential it has, that a lone
+  credential is never rested, and that the anonymous path still makes all of its
+  retries. The last one caught a real regression during development — breaking
+  out of the retry loop on a null credential silently disabled retries for every
+  deployment with no cookie configured at all.
+  The end-to-end tests key their fake transport on the **Cookie header**, not on
+  a call counter, so "the other account was tried" is distinguishable from
+  "something happened twice". Eleven injections confirm the guards: no failover,
+  a 429 that does not rest the account, a 401 reusing the short cooldown, a
+  cooldown ignored when picking, a lone credential skipped, an empty pool
+  mistaken for "all accounts resting", a secondary file mutating global config,
+  a cookie leaking into `/status`, `/status` forgetting the pool, `/metrics`
+  exempting itself from the request counters, and the documented `/status`
+  sample drifting from the real shape.
+* An `acquire(exclude=...)` parameter was written first, because it *looked*
+  like the safety net for a 429. Injecting `acquire()` in its place left every
+  rotation test passing: the failed credential is already cooled, so the round
+  robin skips it either way. It was removed rather than kept — an unreachable
+  branch is not a safety net, it is somewhere for a later bug to hide — and the
+  lone-credential test now fails if it comes back.
 * `test_packaging.CIWorkflowTests` — CI must fail when the suite fails. Actions'
   default shell on Linux is `bash -e {0}`, **without** `pipefail`, so
   `python -m unittest ... | tee log` reports `tee`'s status and a failing suite
@@ -286,7 +310,7 @@ the manifest was verified to fail the step with
 reports 23 skips rather than 12 unless `httpx` is installed, because the
 incremental-streaming tests gate on it — CI installs it first.
 
-Expect **594 tests and 12 skips** from an extracted sdist: 5 git-dependent and
+Expect **630 tests and 12 skips** from an extracted sdist: 5 git-dependent and
 7 repository-metadata. Anything else means either a file stopped shipping or a
 guard started skipping for a new reason. `test_the_sdist_ships_every_file_the_docs_promise`
 guards the first half automatically.

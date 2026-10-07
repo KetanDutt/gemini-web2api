@@ -30,6 +30,13 @@ DEFAULT_CONFIG = {
     "default_model": "gemini-3.6-flash",
     "log_requests": True,
     "cookie_file": None,
+    # Additional accounts to rotate through when the primary one is rate
+    # limited. Empty keeps single-cookie behaviour exactly as it was.
+    "cookie_files": [],
+    # How long a rate-limited account sits out before it is tried again.
+    # A rejected one (401/403) always waits longer, because a stale cookie does
+    # not recover on its own.
+    "cookie_cooldown_sec": 60,
     "proxy": None,
     "api_keys": [],
     "temporary_chats": False,
@@ -289,6 +296,12 @@ def snapshot(redact=True):
             data[key] = "set" if data.get(key) else None
         cookie_file = data.get("cookie_file")
         data["cookie_present"] = bool(cookie_file and os.path.exists(cookie_file))
+        # Paths are not secrets, but a filesystem layout is more than an
+        # operations endpoint needs to hand out. The count is what matters:
+        # it says whether rotation is configured at all.
+        files = data.get("cookie_files")
+        data["cookie_files"] = (
+            f"{len(files)} additional" if isinstance(files, (list, tuple)) else files)
     return data
 
 

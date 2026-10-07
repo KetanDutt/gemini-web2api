@@ -46,6 +46,9 @@ Studio, ChatBox, NextChat, LobeChat, the OpenAI SDK, Codex CLI, Gemini CLI.
   breaking on a frontend rollout
 - **Prometheus metrics** — `GET /metrics` exports counters, status codes and a
   latency histogram in text exposition format, for whatever you already scrape
+- **Multiple accounts** — `cookie_files` rotates across several Google
+  accounts; a rate-limited one rests (`429`) while the request is served by
+  another, and a single-cookie setup behaves exactly as before
 - **Web console** — open `http://localhost:8081/` for a chat playground, live
   status, request activity, model picker and ready-to-paste client config
 - **Production-ready packaging** — non-root Docker image, healthchecks,
@@ -426,7 +429,7 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api tests
 ```
 
-594 tests, all offline — the Gemini wire protocol is faked at the frame level.
+630 tests, all offline — the Gemini wire protocol is faked at the frame level.
 CI covers Python 3.8–3.13, a stdlib-only run with no third-party packages, a
 build-and-install-the-wheel check, lint and a Docker build.
 

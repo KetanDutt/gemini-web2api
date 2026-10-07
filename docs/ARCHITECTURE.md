@@ -39,13 +39,16 @@ here is translation between those two.
 |---|---|---|
 | `config.py` | Defaults, JSON file, environment variables, validation, secret redaction | — |
 | `models.py` | Model table, `MODE_CATEGORY` mapping, `@think=` parsing | `config` |
-| `gemini.py` | Cookie/auth loading, payload framing, upstream HTTP, response parsing, streaming | `config`, `models` |
+| `gemini.py` | Cookie and credential-pool loading, payload framing, upstream HTTP, response parsing, streaming | `config`, `models`, `credentials` |
+| `credentials.py` | The cookie pool: acquire, cooldowns, rotation state | — |
 | `multimodal.py` | Remote image fetching (SSRF-guarded), MIME sniffing, Scotty resumable upload | `config`, `gemini` |
+| `jsonmode.py` | `response_format` instruction, validation of the reply against it | — |
 | `tools.py` | Prompt construction for both dialects, tool-call extraction | `gemini` |
 | `server.py` | HTTP endpoints, auth, rate limiting, SSE, error mapping | everything |
 | `webui.py` | Self-contained status dashboard | — |
 | `ratelimit.py` | Fixed-window limiter | — |
 | `metrics.py` | Counters and latency histogram | — |
+| `prometheus.py` | Prometheus text exposition of a metrics snapshot | `metrics` |
 | `__main__.py` | CLI, config precedence, signal handling, startup banner | everything |
 | `_healthcheck.py` | Container liveness probe (no package imports) | stdlib |
 

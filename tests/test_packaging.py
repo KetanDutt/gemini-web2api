@@ -26,7 +26,8 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACKAGE_DIR = os.path.join(REPO_ROOT, "gemini_web2api")
 SHIM_PATH = os.path.join(REPO_ROOT, "gemini_web2api.py")
 
-EXPECTED_MODULES = ["config", "gemini", "jsonmode", "metrics", "models",
+EXPECTED_MODULES = ["config", "credentials", "gemini", "jsonmode", "metrics",
+                    "models",
                     "multimodal", "prometheus", "ratelimit", "server", "tools",
                     "webui"]
 
@@ -425,6 +426,60 @@ class DocumentationConsistencyTests(unittest.TestCase):
             "docs/API.md's counters sample and the real counters disagree: "
             f"documented-only {sorted(documented - actual)}, "
             f"real-only {sorted(actual - documented)}")
+
+    def test_the_documented_credentials_sample_is_the_real_shape(self):
+        """The `/status` credentials sample, checked field-for-field.
+
+        Written by hand and easy to drift: this sample originally described an
+        `index` field that the pool does not produce and omitted `auth_user`,
+        which it does. Nothing would have noticed, and a reader wiring a
+        dashboard to the documented shape would have found neither.
+
+        Only the *keys* are compared. The sources in the sample are illustrative
+        paths, and the point of the section is which fields exist, not what a
+        particular deployment happens to hold.
+        """
+        from gemini_web2api.credentials import Credential, CredentialPool
+        api_doc = self._read("docs", "API.md")
+        # Start after the opening brace: the key itself is not a field of the
+        # snapshot and would otherwise be compared as one.
+        start = api_doc.index('"credentials": {') + len('"credentials": {')
+        block = api_doc[start:api_doc.index('"history": [', start)]
+        head, entries = block.split('"entries":', 1)
+        documented_top = set(re.findall(r'"([a-z0-9_]+)":', head))
+        documented_entry = set(re.findall(r'"([a-z0-9_]+)":', entries))
+
+        pool = CredentialPool([Credential("SID=a; SAPISID=b", "b", source="/a",
+                                          auth_user="0"),
+                               Credential("SID=c", None, source="/b")])
+        pool.report_rate_limited(pool.acquire(), "429")
+        snapshot = pool.snapshot()
+
+        self.assertEqual(documented_top, set(snapshot) - {"entries"},
+                         "docs/API.md's credentials sample and the real snapshot "
+                         "disagree on the top-level fields")
+        self.assertEqual(documented_entry, set(snapshot["entries"][0]),
+                         "docs/API.md's credentials sample and the real per-entry "
+                         "fields disagree")
+
+    def test_the_architecture_module_table_lists_every_module(self):
+        """The module table is the map of the codebase, and it drifted twice.
+
+        `jsonmode.py` and `prometheus.py` were both added without a row, and
+        nothing noticed: the table is prose, so it can only be wrong silently.
+        Reading it back and comparing against the modules the package actually
+        ships makes a new module a documentation obligation rather than an
+        afterthought.
+        """
+        architecture = self._read("docs", "ARCHITECTURE.md")
+        documented = set(re.findall(r"^\| `([a-z_0-9]+\.py)` \|", architecture, re.MULTILINE))
+        shipped = {name + ".py" for name in EXPECTED_MODULES}
+        expected = shipped | {"__main__.py", "_healthcheck.py"}
+        self.assertEqual(documented, expected,
+                         "docs/ARCHITECTURE.md's module table and the package "
+                         "disagree: documented-only "
+                         f"{sorted(documented - expected)}, undocumented "
+                         f"{sorted(expected - documented)}")
 
     def test_every_doc_page_is_in_the_index(self):
         docs_dir = os.path.join(REPO_ROOT, "docs")
@@ -2124,8 +2179,15 @@ class CIWorkflowTests(unittest.TestCase):
             "would quietly remove guards from CI with no visible signal")
 
     def test_ci_lints_every_python_directory(self):
-        """scripts/ holds real Python; a lint job that skips it lets rot in."""
-        for directory in ("gemini_web2api", "tests", "scripts"):
+        """scripts/ holds real Python; a lint job that skips it lets rot in.
+
+        The root shim is on the list for the same reason, and it had already
+        rotted: an unused `__version__` import sat there unpoliced, and it was
+        worse than dead weight — if the installed package lacked `__version__`,
+        the shim's `except ImportError` would report "the package is missing"
+        and exit 1 for a package that was present and importable.
+        """
+        for directory in ("gemini_web2api.py", "gemini_web2api", "tests", "scripts"):
             self.assertRegex(self.text, rf"ruff check[^\n]*\b{directory}\b",
                              f"CI does not lint {directory}/")
             self.assertRegex(self.text, rf"compileall[^\n]*\b{directory}\b",
