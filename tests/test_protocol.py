@@ -171,6 +171,55 @@ class ExtractResponseTextTests(unittest.TestCase):
         self.assertEqual(extract_response_text(raw), "The answer is 42.")
 
 
+class HttpErrorDescriptionTests(unittest.TestCase):
+    """`_describe_http_error` must not raise while describing a failure."""
+
+    def test_describing_an_error_never_raises(self):
+        """An `HTTPError` without an `fp` is still an `HTTPError`.
+
+        urllib's own handler passes an `fp`, but nothing stops another library —
+        or a mocked transport — from raising one without it, and on Python 3.8
+        that shape cannot even be introspected: `HTTPError` inherits
+        `tempfile._TemporaryFileWrapper` through `addinfourl`, whose
+        `__getattr__` reads `self.__dict__["file"]`, a key `addbase.__init__`
+        only creates when an `fp` was supplied. `getattr(exc, "status_code",
+        None)` therefore *raises* `KeyError: 'file'` instead of returning the
+        default, and the caller sees an unexplained stdlib KeyError where the
+        real answer was "HTTP 429".
+
+        Note the asymmetry: this test passes on 3.9+ whether or not the code is
+        correct, because newer interpreters raise `AttributeError` there. It is
+        the 3.8 CI leg that makes it a guard, which is exactly why the fix is
+        written to not depend on `getattr` at all.
+        """
+        import urllib.error
+
+        from gemini_web2api.gemini import _describe_http_error
+
+        for status in (401, 403, 429, 500):
+            with self.subTest(status=status):
+                exc = urllib.error.HTTPError(
+                    "https://gemini.google.com/", status, "Too Many Requests", {},
+                    None)
+                message, seen = _describe_http_error(exc)
+                self.assertEqual(seen, status)
+                self.assertIn(str(status), message)
+
+    def test_a_realistic_error_still_reports_its_body(self):
+        """The robustness fix must not cost the upstream detail."""
+        import io as _io
+        import urllib.error
+
+        from gemini_web2api.gemini import _describe_http_error
+
+        exc = urllib.error.HTTPError(
+            "u", 429, "Too Many Requests", {},
+            _io.BytesIO(b'{"error": "quota exceeded"}'))
+        message, status = _describe_http_error(exc)
+        self.assertEqual(status, 429)
+        self.assertIn("quota exceeded", message)
+
+
 class FakeStreamResponse:
     """Minimal stand-in for an httpx streaming response."""
 

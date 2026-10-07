@@ -14,6 +14,7 @@ Cookie values never appear in any test assertion output by accident: the pool's
 `snapshot()` is asserted to contain no cookie material at all.
 """
 
+import io
 import json
 import os
 import shutil
@@ -399,8 +400,12 @@ class RotationTests(ConfigTestCase):
             def raise_for_status(self):
                 if self.status_code >= 400:
                     import urllib.error
+                    # With an `fp`, because that is how urllib itself raises it
+                    # (and because an HTTPError without one cannot even report
+                    # its own attributes on Python 3.8 — see
+                    # `test_describing_an_error_never_raises` in test_protocol).
                     raise urllib.error.HTTPError(
-                        "u", self.status_code, "err", {}, None)
+                        "u", self.status_code, "err", {}, io.BytesIO(b""))
 
         class Client:
             def post(self, url, content=None, headers=None):

@@ -724,11 +724,26 @@ def _urlopen(req, timeout=None):
 
 
 def _describe_http_error(exc):
-    """Turn an HTTP error into a message that includes upstream detail."""
-    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    """Turn an HTTP error into a message that includes upstream detail.
+
+    Attributes are read from ``exc.__dict__`` rather than with ``getattr``.
+    ``urllib.error.HTTPError`` inherits ``tempfile._TemporaryFileWrapper`` via
+    ``addinfourl``, and on Python 3.8 that class's ``__getattr__`` looks up
+    ``self.__dict__["file"]`` — a key that only exists once ``addbase.__init__``
+    has run, which happens only when the error carries an ``fp``. For an
+    ``HTTPError`` built without one, *any* missing attribute raises
+    ``KeyError: 'file'`` instead of ``AttributeError``, and a ``getattr(...,
+    default)`` does not catch it. So a clean "HTTP 429" became an unexplained
+    KeyError from inside the standard library — a failure while reporting a
+    failure, which is the worst place for one.
+    """
+    attrs = getattr(exc, "__dict__", {})
+    response = attrs.get("response")
+    status = attrs.get("status_code") or attrs.get("code")
+    if status is None and response is not None:
+        status = attrs.get("status_code") or getattr(response, "status_code", None)
     body = ""
     try:
-        response = getattr(exc, "response", None)
         if response is not None:
             # httpx: .text is available once the body has been read.
             body = getattr(response, "text", "") or ""
