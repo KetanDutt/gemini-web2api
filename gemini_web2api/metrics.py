@@ -2,8 +2,9 @@
 
 Deliberately tiny: counters plus a coarse latency histogram, guarded by one
 lock. There is no persistence and no external dependency — the numbers exist so
-the dashboard and ``/health`` can answer "is this thing working, and how fast",
-and so an operator tailing logs can correlate a request ID with an outcome.
+the dashboard, ``/health`` and ``/status`` can answer "is this thing working,
+and how fast", so ``prometheus.py`` can export them for a scraper, and so an
+operator tailing logs can correlate a request ID with an outcome.
 
 For a multi-process deployment these are per-process. That is intentional;
 aggregating them would require a shared store this project does not have.

@@ -195,6 +195,17 @@ touching these areas, keep the tests green:
   that: the increment was a no-op and only a test caught it. The guard compares
   `metrics.snapshot()["counters"]` against the sample in `docs/API.md` key-for-key,
   so a counter the docs omit, or one the docs invent, fails the build.
+* `test_prometheus.PrometheusFormatTests` — the exposition is *parsed*, not
+  grepped. A regex for `requests_total 3` passes on output Prometheus rejects,
+  and that failure appears in production as an empty graph rather than a red
+  build, so these tests use a strict parser: every sample must be
+  `name{labels} value`, every value numeric, every label quoted and escaped, and
+  every histogram monotonic and ending at `+Inf`. The pair of guards that matter
+  most are the cumulative-bucket conversion and the seconds conversion — both are
+  invisible to a status-code test and both silently corrupt every downstream
+  alert. Six injections confirmed the coverage: raw buckets, milliseconds,
+  unescaped labels, a missing `+Inf` bucket, a counter renamed without `_total`,
+  and a counter left without help text.
 * `test_packaging.CIWorkflowTests` — CI must fail when the suite fails. Actions'
   default shell on Linux is `bash -e {0}`, **without** `pipefail`, so
   `python -m unittest ... | tee log` reports `tee`'s status and a failing suite
@@ -275,7 +286,7 @@ the manifest was verified to fail the step with
 reports 23 skips rather than 12 unless `httpx` is installed, because the
 incremental-streaming tests gate on it — CI installs it first.
 
-Expect **573 tests and 12 skips** from an extracted sdist: 5 git-dependent and
+Expect **594 tests and 12 skips** from an extracted sdist: 5 git-dependent and
 7 repository-metadata. Anything else means either a file stopped shipping or a
 guard started skipping for a new reason. `test_the_sdist_ships_every_file_the_docs_promise`
 guards the first half automatically.

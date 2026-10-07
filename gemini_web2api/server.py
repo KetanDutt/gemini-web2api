@@ -17,12 +17,13 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from urllib.parse import unquote, urlsplit
 
-from . import __version__, jsonmode
+from . import __version__, jsonmode, prometheus
 from .config import CONFIG
 from .config import snapshot as config_snapshot
 from .gemini import HAS_HTTPX, generate, generate_stream, log
 from .metrics import history as metrics_history
 from .metrics import inc, record_latency, record_request, record_status
+from .metrics import snapshot as metrics_snapshot
 from .models import (
     MODE_CATEGORY,
     MODELS,
@@ -204,6 +205,33 @@ class GeminiHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, OSError):
             self.close_connection = True
         self._record(status)
+
+    def send_text(self, body, content_type="text/plain; charset=utf-8", status=200):
+        """Write a non-HTML text body with an accurate Content-Length."""
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        for key, value in self._cors_headers().items():
+            self.send_header(key, value)
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            self.close_connection = True
+        self._record(status)
+
+    def _metrics_authorized(self):
+        """Whether the caller may read `/metrics`.
+
+        Gated exactly like `/status`, because the numbers describe traffic
+        volume, model mix and error rate — an unauthenticated feed of that is a
+        free reconnaissance endpoint. Prometheus supports credentials in its
+        scrape config, so requiring them costs a scraper nothing.
+        """
+        return not (CONFIG.get("api_keys") or []) or self._authorized()
 
     def send_error_json(self, status, message, err_type="invalid_request_error", code=None, param=None):
         """Emit an error in the shape OpenAI clients expect."""
@@ -493,6 +521,15 @@ class GeminiHandler(BaseHTTPRequestHandler):
                 self.send_error_json(401, "invalid api key", "authentication_error", "invalid_api_key")
                 return
             self.send_json(self._status_payload())
+        elif path == "/metrics":
+            # Prometheus scrape target. Handled here rather than through the
+            # catch-all so it works regardless of whether `httpx` is present and
+            # never consults the upstream.
+            if not self._metrics_authorized():
+                self.send_error_json(401, "invalid api key", "authentication_error",
+                                     "invalid_api_key")
+                return
+            self.send_text(prometheus.render(metrics_snapshot()), prometheus.CONTENT_TYPE)
         elif path == "/":
             self._root(query)
         elif path in ("/favicon.ico", "/logo.png"):
@@ -1340,7 +1377,6 @@ class GeminiHandler(BaseHTTPRequestHandler):
         return checks
 
     def _status_payload(self):
-        from .metrics import snapshot as metrics_snapshot
         payload = self._health_payload()
         payload["config"] = config_snapshot()
         payload["config_file"] = None

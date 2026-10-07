@@ -27,7 +27,8 @@ PACKAGE_DIR = os.path.join(REPO_ROOT, "gemini_web2api")
 SHIM_PATH = os.path.join(REPO_ROOT, "gemini_web2api.py")
 
 EXPECTED_MODULES = ["config", "gemini", "jsonmode", "metrics", "models",
-                    "multimodal", "ratelimit", "server", "tools", "webui"]
+                    "multimodal", "prometheus", "ratelimit", "server", "tools",
+                    "webui"]
 
 
 def _git_repo_available():

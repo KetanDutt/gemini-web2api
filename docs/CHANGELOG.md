@@ -377,6 +377,28 @@ was reproduced.
 - A `json_mode_failures` counter, so the rate of non-compliant replies is
   visible to operators rather than only to clients.
 
+- **`GET /metrics`** — Prometheus text exposition (`0.0.4`) of the counters,
+  status codes, latency histogram and per-model latency. The numbers were
+  already collected but reachable only as JSON through the auth-gated
+  `/status`, so a deployment could not be monitored by whatever was already
+  scraping everything else. Gated the same way as `/status` when API keys are
+  configured.
+
+  Two format details are handled deliberately. **Histogram buckets are
+  cumulative in Prometheus and are not in `metrics.py`** — `record_latency`
+  increments exactly one bucket per observation, so the series is accumulated as
+  it is written; emitting the raw values would understate every bucket except
+  the last and quietly corrupt `histogram_quantile`. And **durations are
+  converted to seconds**, because a metric named `_seconds` carrying
+  milliseconds rescales every dashboard and alert threshold by 1000 while the
+  name asserts it is correct.
+
+  Label values are escaped rather than interpolated, since an unescaped newline
+  in a label can forge an extra metric line. Per-model latency is exported as
+  sum/count/max rather than as separate histograms, honestly reflecting that
+  there is one global set of buckets, and `docs/API.md` says so along with the
+  per-process caveat.
+
 ### Changed
 
 **Performance**
@@ -531,7 +553,7 @@ was reproduced.
 
 ### Tests
 
-- 18 tests → **573**, all offline. The Gemini wire protocol is faked at the frame
+- 18 tests → **594**, all offline. The Gemini wire protocol is faked at the frame
   level so real parsing and real HTTP handling are exercised without a network.
 - New modules for config layering, cookie formats, model resolution, protocol
   framing and streaming, prompt/tool parsing, every HTTP route, security

@@ -23,6 +23,7 @@ server-side cause.
 | `GET` | `/health`, `/healthz`, `/live` | no | Liveness probe |
 | `GET` | `/ready` | no | Readiness probe, 503 when not ready |
 | `GET` | `/status` | when keys set | Metrics and redacted config |
+| `GET` | `/metrics` | when keys set | Prometheus text exposition |
 | `OPTIONS` | any | no | CORS preflight |
 | `HEAD` | `/health` | no | Probe without a body |
 
@@ -352,6 +353,63 @@ Because entries include client addresses, `history` is served **only** from this
 auth-gated endpoint. It is deliberately excluded from `metrics` and from the
 state embedded in the public `GET /` dashboard, which carries an
 `history_enabled` flag instead of any entries.
+
+### GET /metrics
+
+Prometheus text exposition (version `0.0.4`), for a scraper you already run.
+Requires an API key when keys are configured — the same gate as `/status`, and
+for the same reason: traffic volume, model mix and error rate describe what a
+deployment is for and when it is struggling.
+
+```
+# HELP gemini_web2api_completions_total Non-streaming chat completions answered.
+# TYPE gemini_web2api_completions_total counter
+gemini_web2api_completions_total 480
+# HELP gemini_web2api_request_duration_seconds Upstream round-trip time for chat requests.
+# TYPE gemini_web2api_request_duration_seconds histogram
+gemini_web2api_request_duration_seconds_bucket{le="2.5"} 431
+gemini_web2api_request_duration_seconds_bucket{le="+Inf"} 480
+gemini_web2api_request_duration_seconds_sum 720.4
+gemini_web2api_request_duration_seconds_count 480
+gemini_web2api_model_requests_total{model="gemini-3.6-flash"} 500
+```
+
+Exported series:
+
+| Series | Type | Notes |
+|---|---|---|
+| `gemini_web2api_uptime_seconds` | gauge | Since process start. |
+| `gemini_web2api_<counter>_total` | counter | One per `/status` counter, including zeros. |
+| `gemini_web2api_http_responses_total{status}` | counter | Per status code. |
+| `gemini_web2api_request_duration_seconds` | histogram | Upstream round trip; buckets at 50ms–60s. |
+| `gemini_web2api_model_requests_total{model}` | counter | Requests per resolved model. |
+| `gemini_web2api_model_request_duration_seconds_sum{model}` | counter | For `rate()`-based averages. |
+| `gemini_web2api_model_request_duration_seconds_max{model}` | gauge | Slowest seen. |
+
+Three things are worth knowing before pointing a scraper at it:
+
+* **Durations are seconds.** The internal histogram is in milliseconds; the
+  export converts, because a metric named `_seconds` carrying milliseconds
+  rescales every dashboard and alert threshold by 1000 without changing a label.
+* **The histogram is global, not per-model.** There is one set of buckets, so
+  per-model latency is exposed as sum/count/max rather than as separate
+  histograms. A per-model `histogram_quantile` is therefore not available; use
+  `rate(..._sum{model="…"}[5m]) / rate(..._count{model="…"}[5m])` for an average.
+* **The numbers are per-process.** With several worker processes, each exposes
+  its own; Prometheus scraping one port sees one process. Run one process per
+  scrape target, or aggregate in the query.
+
+A scrape config with authentication:
+
+```yaml
+scrape_configs:
+  - job_name: gemini-web2api
+    metrics_path: /metrics
+    authorization:
+      credentials: sk-your-key
+    static_configs:
+      - targets: ["127.0.0.1:8081"]
+```
 
 ### GET /
 
