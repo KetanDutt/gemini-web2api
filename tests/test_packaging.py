@@ -4,6 +4,7 @@ These guard the two structural defects that made the project unusable as a
 distributed package: setuptools could not build it at all, and the same server
 existed twice in divergent copies.
 """
+import ast
 import importlib
 import os
 import re
@@ -234,6 +235,190 @@ class DocumentationPresenceTests(unittest.TestCase):
         for name in MODELS:
             with self.subTest(model=name):
                 self.assertIn(name, readme)
+
+
+class DocumentationConsistencyTests(unittest.TestCase):
+    """Docs must describe what the code actually does.
+
+    Stale documentation was one of the defects this release fixed — the README
+    claimed a "single file" implementation that did not exist and listed a model
+    table missing two shipped models. These tests make that class of drift fail
+    the build instead of misleading a reader.
+    """
+
+    def _read(self, *parts):
+        with open(os.path.join(REPO_ROOT, *parts), encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_documented_endpoints_are_routed(self):
+        """Every endpoint in API.md must correspond to a route in server.py."""
+        server = self._read("gemini_web2api", "server.py")
+        api_doc = self._read("docs", "API.md")
+        documented = set(re.findall(r"`(/[a-z0-9/v{}:_.*\-]+)`", api_doc))
+        self.assertTrue(documented, "no endpoints found in docs/API.md")
+        missing = []
+        for path in sorted(documented):
+            # Strip {placeholders} and :verb suffixes to get the routed prefix.
+            core = path.split("{")[0].split(":")[0].rstrip("/")
+            if not core:
+                continue
+            if core not in server and core.replace("/v1beta", "") not in server:
+                missing.append(path)
+        self.assertEqual(missing, [], f"API.md documents unrouted endpoints: {missing}")
+
+    def test_every_config_key_is_documented(self):
+        from gemini_web2api.config import DEFAULT_CONFIG
+        conf_doc = self._read("docs", "CONFIGURATION.md")
+        missing = [key for key in DEFAULT_CONFIG if key not in conf_doc]
+        self.assertEqual(missing, [], f"undocumented config keys: {missing}")
+
+    def test_every_doc_page_is_in_the_index(self):
+        docs_dir = os.path.join(REPO_ROOT, "docs")
+        index = self._read("docs", "README.md")
+        pages = [f for f in sorted(os.listdir(docs_dir))
+                 if f.endswith(".md") and f != "README.md"]
+        self.assertTrue(pages, "docs/ contains no pages")
+        missing = [page for page in pages if page not in index]
+        self.assertEqual(missing, [], f"docs pages not linked from docs/README.md: {missing}")
+
+    def test_every_doc_page_is_reachable_from_the_readme(self):
+        """AUDIT.md is an internal working document, so it is exempt."""
+        docs_dir = os.path.join(REPO_ROOT, "docs")
+        readme = self._read("README.md")
+        pages = [f for f in sorted(os.listdir(docs_dir))
+                 if f.endswith(".md") and f not in ("README.md", "AUDIT.md")]
+        missing = [page for page in pages if f"docs/{page}" not in readme]
+        self.assertEqual(missing, [], f"docs pages not linked from README.md: {missing}")
+
+    def test_current_version_appears_in_the_changelog(self):
+        import gemini_web2api
+        changelog = self._read("docs", "CHANGELOG.md")
+        self.assertIn(f"## [{gemini_web2api.__version__}]", changelog)
+
+    def test_both_readmes_claim_the_same_test_count(self):
+        """The advertised test count must match the suite that actually runs."""
+        import unittest as _unittest
+
+        loader = _unittest.TestLoader()
+        suite = loader.discover(os.path.join(REPO_ROOT, "tests"), top_level_dir=REPO_ROOT)
+        actual = suite.countTestCases()
+        for name in ("README.md", "README_CN.md"):
+            text = self._read(name)
+            claimed = re.search(r"(\d{2,4})\s*(?:tests|个测试)", text)
+            self.assertIsNotNone(claimed, f"no test count found in {name}")
+            self.assertEqual(
+                int(claimed.group(1)), actual,
+                f"{name} claims {claimed.group(1)} tests but the suite has {actual}",
+            )
+
+
+class Python38CompatibilityTests(unittest.TestCase):
+    """`requires-python = ">=3.8"` must be true, not aspirational.
+
+    `compile()` under a newer interpreter happily accepts newer syntax, so these
+    parse the AST and look for constructs that would raise at import time on 3.8.
+    The AST is used rather than a text scan because a regex cannot tell an
+    annotation from a `|` inside a regex string literal — scanning gemini.py for
+    `x | y` matches its code-fence pattern, which is not an annotation at all.
+    """
+
+    _BUILTIN_GENERICS = {"list", "dict", "tuple", "set", "frozenset", "type"}
+    _TREES = None
+
+    def _trees(self):
+        if Python38CompatibilityTests._TREES is None:
+            trees = {}
+            package = os.path.join(REPO_ROOT, "gemini_web2api")
+            for directory, subdirs, files in os.walk(package):
+                subdirs[:] = [d for d in subdirs if d != "__pycache__"]
+                for name in files:
+                    if name.endswith(".py"):
+                        path = os.path.join(directory, name)
+                        with open(path, encoding="utf-8") as handle:
+                            trees[name] = ast.parse(handle.read(), filename=path)
+            Python38CompatibilityTests._TREES = trees
+        return Python38CompatibilityTests._TREES
+
+    def _annotations(self, tree):
+        """Yield only nodes in annotation position."""
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.returns is not None:
+                    yield node.returns
+                groups = (node.args.args, node.args.kwonlyargs,
+                          getattr(node.args, "posonlyargs", []))
+                for group in groups:
+                    for arg in group:
+                        if arg.annotation is not None:
+                            yield arg.annotation
+                for extra in (node.args.vararg, node.args.kwarg):
+                    if extra is not None and extra.annotation is not None:
+                        yield extra.annotation
+            elif isinstance(node, ast.AnnAssign) and node.annotation is not None:
+                yield node.annotation
+
+    def test_no_pep585_builtin_generics_in_annotations(self):
+        """`list[str]` annotations need 3.9+."""
+        offenders = []
+        for name, tree in self._trees().items():
+            for annotation in self._annotations(tree):
+                for node in ast.walk(annotation):
+                    if (isinstance(node, ast.Subscript)
+                            and isinstance(node.value, ast.Name)
+                            and node.value.id in self._BUILTIN_GENERICS):
+                        offenders.append(f"{name}:{node.lineno} {node.value.id}[...]")
+        self.assertEqual(offenders, [], f"PEP 585 generics need Python 3.9+: {offenders}")
+
+    def test_no_pep604_union_annotations(self):
+        """`str | None` annotations need 3.10+."""
+        offenders = []
+        for name, tree in self._trees().items():
+            for annotation in self._annotations(tree):
+                for node in ast.walk(annotation):
+                    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+                        offenders.append(f"{name}:{node.lineno}")
+        self.assertEqual(offenders, [], f"PEP 604 unions need Python 3.10+: {offenders}")
+
+    def test_no_match_statements(self):
+        """`match`/`case` needs 3.10+. `match = re.search(...)` is just a name."""
+        if not hasattr(ast, "Match"):
+            self.skipTest("this interpreter cannot parse match statements")
+        offenders = []
+        for name, tree in self._trees().items():
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Match):
+                    offenders.append(f"{name}:{node.lineno}")
+        self.assertEqual(offenders, [], f"match statements need Python 3.10+: {offenders}")
+
+    def test_no_dict_merge_operator(self):
+        """`{} | {}` needs 3.9+. Only literal dicts are flagged, so a bitwise
+        `or` on ints or sets is not a false positive."""
+        offenders = []
+        for name, tree in self._trees().items():
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr)
+                        and isinstance(node.left, ast.Dict)
+                        and isinstance(node.right, ast.Dict)):
+                    offenders.append(f"{name}:{node.lineno}")
+        self.assertEqual(offenders, [], f"dict | merge needs Python 3.9+: {offenders}")
+
+    def test_no_39_plus_stdlib_apis(self):
+        """Distinctive spellings, safe to scan as text."""
+        banned = ("removeprefix(", "removesuffix(", "functools.cache",
+                  "import zoneinfo", "import graphlib", "asyncio.to_thread")
+        offenders = {}
+        package = os.path.join(REPO_ROOT, "gemini_web2api")
+        for directory, subdirs, files in os.walk(package):
+            subdirs[:] = [d for d in subdirs if d != "__pycache__"]
+            for name in files:
+                if not name.endswith(".py"):
+                    continue
+                with open(os.path.join(directory, name), encoding="utf-8") as handle:
+                    source = handle.read()
+                hits = [token for token in banned if token in source]
+                if hits:
+                    offenders[name] = hits
+        self.assertEqual(offenders, {}, f"3.9+ stdlib APIs used: {offenders}")
 
 
 class SyntaxTests(unittest.TestCase):
