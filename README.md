@@ -423,6 +423,17 @@ build-and-install-the-wheel check, lint and a Docker build.
 multi-cookie rotation, browser-fingerprint rotation and request jitter.
 Documentation is in Chinese.
 
+It is **not** built from the Python code, and the two diverge in both
+directions. The Worker adds multi-account cookie rotation, fingerprint rotation
+and request jitter; it lacks image input (image parts are **silently
+discarded**), `/v1/completions`, and the `/ready` and `/status` probes, and it
+routes any unmatched `POST /v1/*` to chat completions rather than returning 501.
+It also ships 7 models versus this server's 9. Read the
+[divergence table](cloudflare/README.MD#-与-python-版本的差异) before choosing.
+
+Version numbers are independent sequences: the Worker is
+`1.5.0-cf-multifingerprint`, this package is `1.2.0`.
+
 ## Acknowledgments
 
 - Inspired by the open-source API proxy ecosystem

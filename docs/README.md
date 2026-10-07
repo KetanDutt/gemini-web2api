@@ -22,7 +22,12 @@ Start with the [project README](../README.md) for the 60-second version.
   Chrome extension that exports your Gemini session (cookies, XSRF token, build
   tag, account index) into `gemini-auth.json`.
 * [`cloudflare/`](../cloudflare/README.MD) — an independent Cloudflare Workers
-  port for serverless deployment (Chinese documentation).
+  port for serverless deployment (Chinese documentation). It is **not** built
+  from the Python code and the two diverge in both directions: the Worker adds
+  multi-cookie and fingerprint rotation, while lacking image input (silently
+  discarded), `/v1/completions`, and the `/ready` and `/status` probes. See its
+  [divergence table](../cloudflare/README.MD#-与-python-版本的差异) before
+  choosing between them.
 
 ## Quick navigation
 

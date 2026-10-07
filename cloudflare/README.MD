@@ -283,6 +283,50 @@ SAPISID = "sapisid_1| sapisid_2| sapisid_3"
 
 ---
 
+## 🔀 与 Python 版本的差异
+
+**Worker 是独立实现，不是从 Python 代码构建的。** 两者运行环境不同（Workers 无 Node/Python 运行时），无法共享模块，因此功能和模型列表会各自演进，**不保证一致**。选型前请对照下表。
+
+Worker 当前支持 **7 个模型**，Python 版本支持 **9 个**。
+
+| 能力 | Cloudflare Worker | Python 版本 |
+|------|-------------------|-------------|
+| `gemini-3.7-flash` | ❌ 未收录 | ✅ |
+| `gemini-3.1-pro-enhanced` | ❌ 未收录 | ✅ |
+| 多 Cookie 轮换（多账号随机） | ✅ | ❌ |
+| 浏览器指纹轮换（8 种 UA + 6 种语言） | ✅ | ❌ |
+| 请求前随机延迟抖动 | ✅ | ❌ |
+| `/v1/chat/completions` | ✅ | ✅ |
+| `/v1/responses`（Codex CLI） | ✅ | ✅ |
+| `/v1/completions`（旧版补全） | ❌ 见下方兜底说明 | ✅ |
+| Google 原生 `/v1beta`（Gemini CLI） | ✅ | ✅ |
+| `/health` 健康检查 | ✅ | ✅ |
+| `/ready` `/status` 探针与指标 | ❌ | ✅ |
+| 图片输入（多模态） | ❌ **静默丢弃** | ✅ |
+| 构建标签（`bl`）自动刷新 | ✅ | ✅ |
+| 速率限制 | ✅ | ✅ |
+| SSRF 防护 / 请求体大小上限 | ❌ 不适用（不抓取图片） | ✅ |
+| Web 控制台 | ❌ | ✅ |
+| 环境变量配置 | ✅ Worker 变量 | ✅ `GEMINI_WEB2API_*` |
+
+> 两者的版本号是独立序列：Worker 为 `1.5.0-cf-multifingerprint`，Python 包为 `1.2.0`。版本号接近纯属巧合，不代表功能对应。
+
+### 两个需要特别注意的行为差异
+
+**图片会被静默丢弃。** Worker 解析多模态消息数组时只提取 `type` 为 `text` / `input_text` 的部分，`image_url` 与 `inlineData` 被直接忽略且**不报错**。客户端会以为图片已被理解，实际只发送了文字。Python 版本会真正下载并上传图片，或在无法处理时返回 400。
+
+**未匹配的 `POST /v1/*` 会被兜底转为 chat。** Worker 对 `/v1/` 下任何未识别的路径都调用 `handleChatCompletions`。这对容忍客户端路径差异有帮助，但意味着 `POST /v1/embeddings` 不会返回 `501 not implemented`，而是被当作聊天请求处理并产生一次 Gemini 调用。Python 版本对未实现的端点明确返回 501，对未知路径返回 404。
+
+**如何选择：**
+
+- 需要图片输入、完整的运维探针、或严格的端点语义 → 用 Python 版本
+- 需要多账号轮换来分摊频率限制、或想要零服务器运维 → 用 Worker
+- 两者都可用时，建议先用 Python 版本，其文档更完整（见 [`docs/`](../docs/README.md)）
+
+Python 版本的完整文档见仓库根目录的 [`docs/`](../docs/README.md)（英文）。
+
+---
+
 ## 📝 更新日志
 
 | 版本 | 日期 | 更新内容 |
@@ -296,4 +340,4 @@ SAPISID = "sapisid_1| sapisid_2| sapisid_3"
 
 ## 📄 许可证
 
-本项目基于原项目 [gemini-web2api](https://github.com/your-repo/gemini-web2api) 移植，遵循原项目的开源协议。
+本项目基于 [gemini-web2api](https://github.com/KetanDutt/gemini-web2api) 移植，遵循原项目的 MIT 开源协议。
