@@ -76,6 +76,36 @@ was reproduced.
 - A malformed `Content-Length` raised `ValueError` and produced a 500 instead of
   a 400.
 
+- Streaming requests were never counted. `_start_sse()` returned before the
+  response was recorded, so every `stream: true` completion was missing from
+  `requests_served`, `status_codes` and the per-model latency table — the metrics
+  under-reported exactly the traffic that matters most. `_record()` is now called
+  when the stream opens, and is idempotent so a later error response on the same
+  request cannot double-count.
+
+- Request history measured time-to-first-byte instead of request duration for
+  streaming replies. The entry was written when the SSE headers went out, so a
+  reply that took four seconds to generate was logged as `0.6ms`. The Activity
+  tab's latency column was therefore not merely imprecise but inverted in
+  meaning — the slowest requests looked the fastest. Counters are still recorded
+  when the stream opens (the `200` header is already on the wire and must count
+  even if the client disconnects), but the history entry is now written from a
+  `finally` in each verb handler, so it covers the whole exchange and is still
+  logged when a stream fails part-way.
+
+- `HEAD` and `OPTIONS` responses bypassed `send_json`, so they were never counted
+  in `requests_served` or `status_codes` at all.
+
+- A stream that failed mid-flight never incremented `upstream_failures`. The
+  non-streaming path routes through `_upstream_failure()`, which counts it; the
+  streaming path caught the exception, emitted an SSE error event and moved on.
+  The result was that an outage affecting only streaming traffic — the common
+  case, since streaming holds connections open longest — reported a perfectly
+  healthy server. It cannot reuse `_upstream_failure()`, because that sends an
+  HTTP error status after the `200` header has already gone out, so the counter
+  is incremented directly. The HTTP status remains legitimately `200`: headers
+  were sent before the failure, and the error travels as an SSE event.
+
 - `resolve_model` ignored the configured `default_model` when falling back,
   using a hardcoded name instead.
 
@@ -113,13 +143,54 @@ was reproduced.
 - `X-Request-Id` on every response, echoed in logs, so a client-side error can be
   tied to a server-side cause.
 
-**Dashboard**
+**Web console**
 
-- A self-contained status dashboard at `GET /` for browsers: runtime state,
-  warnings, the model table with one-click copy, an endpoint reference, and a
-  playground that streams a real completion. Inlined CSS and JS with no external
-  requests, so it works air-gapped. `GET /` still returns JSON for programmatic
-  clients via content negotiation, and `/?format=json` forces it.
+- A self-contained console at `GET /` for browsers, replacing the status-only
+  page. Five tabs — **Chat**, **Status**, **Activity**, **Models**, **API** —
+  with inlined CSS and JS and no external requests, so it works air-gapped.
+  `GET /` still returns JSON for programmatic clients via content negotiation,
+  and `/?format=json` forces it.
+- The **Chat** tab is a real streaming playground: it consumes the SSE stream
+  incrementally, has a Stop button backed by `AbortController`, a model picker
+  with thinking-depth selection (`@think=0..4`), and renders a safe subset of
+  Markdown. Conversations are saved in the browser's `localStorage` and can be
+  switched between, renamed and deleted; multi-turn works by resending the
+  transcript, since Gemini's web endpoint is single-turn. The server stores no
+  conversation records.
+- The **Activity** tab shows the request history from `/status`, filterable by
+  all / errors / route, auto-refreshing every 5s.
+
+**Request history**
+
+- `/status` gained a `history` array: the most recent requests, newest first,
+  each with timestamp, `X-Request-Id`, method, path, status, the **resolved**
+  model, latency and client address. Recording the resolved name means a silent
+  fallback from an unknown model is visible rather than looking like success.
+- Bounded by the new `history_max` option (default 200, hard cap 1000, `0`
+  disables it), so a long-running process cannot grow without limit.
+- Stores operational facts only. Prompts, response bodies and credentials are
+  never recorded, and query strings are stripped so a `?key=<api_key>` cannot be
+  retained. Because entries carry client addresses, history is served **only**
+  from the auth-gated `/status` and is excluded from `metrics.snapshot()` and
+  from the state embedded in the public `GET /` page, which gets an
+  `history_enabled` flag instead.
+
+**Windows**
+
+- `start.bat` — a one-click launcher at the repository root. It finds a Python
+  3.8+ interpreter, creates `.venv` (recreating it if broken), installs
+  `requirements.txt`, writes a default `config.json` and starts the server,
+  then opens the dashboard once the socket has bound.
+- The generated config binds `127.0.0.1` with no API keys. A double-clicked
+  launcher runs on a desktop, and binding `0.0.0.0` there would publish an
+  unauthenticated proxy to the whole LAN; localhost-only makes auth-off safe.
+  An existing `config.json` is never modified.
+- Python is detected by executing each candidate and checking its version, not
+  by searching PATH — Windows ships a Microsoft Store `python.exe` stub that
+  opens the Store instead of running Python.
+- A failed dependency install warns rather than aborting, since `httpx` is
+  optional; errors end in `pause` so the window cannot vanish unexplained.
+- `scripts/win_setup.py` holds the JSON handling the batch file delegates to it.
 
 **Configuration**
 
@@ -266,7 +337,7 @@ was reproduced.
 
 ### Tests
 
-- 18 tests → **417**, all offline. The Gemini wire protocol is faked at the frame
+- 18 tests → **478**, all offline. The Gemini wire protocol is faked at the frame
   level so real parsing and real HTTP handling are exercised without a network.
 - New modules for config layering, cookie formats, model resolution, protocol
   framing and streaming, prompt/tool parsing, every HTTP route, security
@@ -291,6 +362,20 @@ was reproduced.
   phantom models, `(mode, think)` disagreements, and undocumented gaps all fail,
   and `node --check` guards the Worker's syntax (skipped when Node is absent).
   Each guard was verified to fail on an injected violation before being kept.
+- Request history is covered from both sides: `HistoryTests` exercises the ring
+  directly (bound at the cap, `limit <= 0` returns nothing, non-dict entries
+  dropped, entries returned as copies, absent from `snapshot()`), and
+  `RequestHistoryTests` drives it over real HTTP (query strings stripped, errors
+  recorded, resolved model attributed, `history_max: 0` disables it, streaming
+  counted, nothing leaked into the public `GET /` state).
+- The Windows launcher cannot execute on a Linux CI runner, so
+  `WindowsLauncherTests` guards its content — version-checked Python detection,
+  quoted paths, `pause` on failure, localhost-only defaults, requirements.txt as
+  the single dependency source — and `WindowsSetupHelperTests` imports
+  `scripts/win_setup.py` and tests its real behaviour (creates, idempotent,
+  preserves a user port, survives corrupt JSON, rejects out-of-range ports).
+  Every content guard was verified to fail by injecting the violation it
+  forbids, then restored.
 
 ---
 

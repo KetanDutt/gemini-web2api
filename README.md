@@ -42,13 +42,21 @@ Studio, ChatBox, NextChat, LobeChat, the OpenAI SDK, Codex CLI, Gemini CLI.
   you set keys, plus optional rate limiting
 - **Self-healing** — refreshes Google's build tag automatically instead of
   breaking on a frontend rollout
-- **Web dashboard** — open `http://localhost:8081/` to see status, models and a
-  streaming playground
+- **Web console** — open `http://localhost:8081/` for a chat playground, live
+  status, request activity, model picker and ready-to-paste client config
 - **Production-ready packaging** — non-root Docker image, healthchecks,
   environment configuration, graceful shutdown, CI
+- **One-click Windows setup** — double-click `start.bat` to create a venv,
+  install dependencies, write a safe `config.json` and launch
 - **Zero required dependencies** — Python 3.8+, `httpx` optional
 
 ## Quick start
+
+**Windows** — double-click [`start.bat`](start.bat). It finds Python, creates a
+virtual environment, installs dependencies, writes a `config.json` bound to
+`127.0.0.1`, starts the server and opens the dashboard. Nothing else to do.
+
+**macOS / Linux**
 
 ```bash
 pip install httpx          # optional, but needed for true streaming
@@ -338,10 +346,19 @@ curl -s http://localhost:8081/status | python3 -m json.tool   # metrics + redact
 ```
 
 `/status` reports request counts, error counts by status code, average latency,
-a latency histogram and per-model breakdowns. Or open the dashboard at `/` — it
-shows the same thing plus a playground you can stream a test prompt through.
+a latency histogram, per-model breakdowns and a `history` array of recent
+requests. Or open the console at `/` — it shows the same thing, plus a chat
+playground you can stream through and a filterable activity log.
 
-Every response carries `X-Request-Id`, echoed in the server logs.
+`history` holds the last `history_max` requests (default 200, capped at 1000;
+`0` disables it) with timestamp, `X-Request-Id`, method, path, status, the
+**resolved** model, latency and client address. Prompts, response bodies and
+credentials are never stored and query strings are stripped. Because entries
+carry client addresses, `history` is served only from the auth-gated `/status`
+— it is never embedded in the public `GET /` page.
+
+Every response carries `X-Request-Id`, echoed in the server logs and in each
+history entry, so a browser request can be traced to its log line.
 
 ## Documentation
 
@@ -404,7 +421,7 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api tests
 ```
 
-417 tests, all offline — the Gemini wire protocol is faked at the frame level.
+478 tests, all offline — the Gemini wire protocol is faked at the frame level.
 CI covers Python 3.8–3.13, a stdlib-only run with no third-party packages, a
 build-and-install-the-wheel check, lint and a Docker build.
 

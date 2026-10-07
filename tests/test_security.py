@@ -4,7 +4,11 @@ import socket
 import unittest
 from unittest import mock
 
-from gemini_web2api.multimodal import _is_blocked_address, fetch_image_bytes
+from gemini_web2api.multimodal import (
+    ImageFetchError,
+    _is_blocked_address,
+    fetch_image_bytes,
+)
 from gemini_web2api.ratelimit import LIMITER, RateLimiter
 from tests.support import ServerTestCase
 
@@ -80,11 +84,14 @@ class ApiKeyTests(ServerTestCase):
         first.read()
         self.assertEqual(first.status, 401)
 
-        # Same connection, now with credentials.
-        connection.request("POST", "/v1/chat/completions", body=payload,
-                           headers={"Content-Type": "application/json",
-                                    "Authorization": "Bearer sk-secret"})
+        # Same connection, now with credentials. The patch must be installed
+        # BEFORE the request is sent: patching after `connection.request()`
+        # races the server thread, which can reach the real upstream and answer
+        # 502 instead of 200.
         with mock.patch("gemini_web2api.server.generate", return_value="ok"):
+            connection.request("POST", "/v1/chat/completions", body=payload,
+                               headers={"Content-Type": "application/json",
+                                        "Authorization": "Bearer sk-secret"})
             second = connection.getresponse()
             body = second.read().decode()
         self.assertEqual(second.status, 200)
@@ -156,15 +163,53 @@ class SsrfPolicyTests(unittest.TestCase):
 
 
 class FetchImageTests(unittest.TestCase):
+    """Image-fetch policy tests.
+
+    No test here may touch the network. setUp installs a hard blocker on
+    socket connection so an accidental real request fails immediately and
+    deterministically. That is not hypothetical: test_redirects_are_revalidated
+    used to mock getaddrinfo but not the opener, so it really connected to
+    93.184.216.34 (example.com). Its result then depended on external network
+    state - it passed when the connection timed out and failed when it succeeded
+    and returned bytes - and it added seconds of latency to the suite.
+    """
+
     def setUp(self):
         from gemini_web2api.config import CONFIG
         self._saved = dict(CONFIG)
         CONFIG["log_requests"] = False
 
+        # Record attempts rather than only raising: fetch_image_bytes swallows
+        # every Exception by contract ("raise nothing, return b\"\")", and
+        # AssertionError IS an Exception, so a raise-only guard would be caught
+        # and discarded - the test would pass while a real connection happened.
+        self._network_attempts = []
+
+        def _no_network(*args, **kwargs):
+            self._network_attempts.append(args[:1] or kwargs)
+            raise OSError("network I/O is disabled in FetchImageTests")
+
+        self._patches = [
+            mock.patch("socket.socket.connect", side_effect=_no_network),
+            mock.patch("socket.socket.connect_ex", side_effect=_no_network),
+            mock.patch("socket.create_connection", side_effect=_no_network),
+        ]
+        for patch in self._patches:
+            patch.start()
+
     def tearDown(self):
+        for patch in self._patches:
+            patch.stop()
         from gemini_web2api.config import CONFIG
         CONFIG.clear()
         CONFIG.update(self._saved)
+        # Assert after restoring CONFIG so a failure here is not masked.
+        self.assertEqual(
+            self._network_attempts, [],
+            "FetchImageTests must not perform real network I/O; mock "
+            "urllib.request.OpenerDirector.open as well as socket.getaddrinfo. "
+            f"Attempted: {self._network_attempts}"
+        )
 
     def test_non_http_schemes_are_refused(self):
         for url in ("file:///etc/passwd", "ftp://example.com/x.png",
@@ -184,19 +229,57 @@ class FetchImageTests(unittest.TestCase):
     def test_credentials_in_the_url_are_refused(self):
         self.assertEqual(fetch_image_bytes("https://user:pass@93.184.216.34/x.png"), b"")
 
-    def test_redirects_are_revalidated(self):
-        """A public URL that 302s to localhost must not be followed."""
+    def test_redirect_to_internal_host_is_refused(self):
+        """The guard itself must reject a private redirect target.
 
-        class Redirecting:
-            def __call__(self, *args, **kwargs):
-                raise AssertionError("should not reach the internal host")
+        urlopen follows redirects transparently, so without re-validation a
+        public URL could 302 to http://169.254.169.254/ and defeat a check that
+        only inspected the original target.
+        """
+        from gemini_web2api.multimodal import _GuardedRedirect
 
-        with mock.patch("socket.getaddrinfo") as getaddrinfo:
-            def resolve(host, *args, **kwargs):
-                if host == "public.example":
-                    return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0))]
-                return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))]
-            getaddrinfo.side_effect = resolve
+        handler = _GuardedRedirect()
+        request = mock.MagicMock(full_url="http://public.example/x.png")
+        for internal in ("http://127.0.0.1/secret",
+                         "http://169.254.169.254/latest/meta-data/",
+                         "http://192.168.1.1/admin",
+                         "file:///etc/passwd"):
+            with self.subTest(target=internal), self.assertRaises(ImageFetchError):
+                handler.redirect_request(request, None, 302, "Found", {}, internal)
+
+    def test_redirect_to_public_host_is_delegated(self):
+        """A public target must fall through to the normal redirect handling.
+
+        The guard's contract is "re-validate, then delegate". Patching the
+        parent method to a sentinel proves delegation happens without having to
+        reproduce urllib's internal Request bookkeeping.
+        """
+        from gemini_web2api.multimodal import _GuardedRedirect
+
+        handler = _GuardedRedirect()
+        request = mock.MagicMock(full_url="http://public.example/x.png")
+        sentinel = object()
+        with mock.patch("socket.getaddrinfo",
+                        return_value=[(socket.AF_INET, socket.SOCK_STREAM, 0, "",
+                                       ("93.184.216.34", 0))]), \
+             mock.patch("urllib.request.HTTPRedirectHandler.redirect_request",
+                        return_value=sentinel) as parent:
+            result = handler.redirect_request(
+                request, None, 302, "Found", {}, "http://cdn.example/x.png")
+        self.assertIs(result, sentinel)
+        parent.assert_called_once()
+
+    def test_fetch_refuses_when_a_redirect_hop_is_internal(self):
+        """End to end: a public URL that redirects internally yields b""."""
+        from gemini_web2api.multimodal import _GuardedRedirect
+
+        def guard(self_, req, fp, code, msg, headers, newurl):
+            raise ImageFetchError(f"redirect to {newurl} refused")
+
+        with mock.patch("gemini_web2api.multimodal._validate_url"), \
+             mock.patch.object(_GuardedRedirect, "redirect_request", guard), \
+             mock.patch("urllib.request.OpenerDirector.open",
+                        side_effect=ImageFetchError("redirect refused")):
             self.assertEqual(fetch_image_bytes("http://public.example/x.png"), b"")
 
     def test_oversized_image_is_refused(self):

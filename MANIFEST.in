@@ -6,6 +6,8 @@ include README_CN.md
 include LICENSE
 include requirements.txt
 include config.example.json
+include start.bat
+recursive-include scripts *.py
 recursive-include docs *.md
 recursive-include tests *.py
 recursive-include cloudflare *.js *.MD *.md

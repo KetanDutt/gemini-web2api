@@ -4,11 +4,78 @@
 
 | Option | Use when | Notes |
 |---|---|---|
+| `start.bat` (Windows) | Desktop use on Windows | One click: venv, dependencies, config, launch |
 | Direct Python | Local use, development | No Docker, no build step |
 | Docker | Always-on server | Non-root, health-checked, env-configured |
 | Docker Compose | Single-host deployment | Two variants: bridge and host networking |
 | systemd | Bare-metal Linux service | Restarts, journald logging |
 | Cloudflare Workers | Serverless, no server | Separate implementation in [`cloudflare/`](../cloudflare/README.MD) |
+
+---
+
+## Windows: one-click launcher
+
+Double-click [`start.bat`](../start.bat) in the repository root. It runs five
+steps and then leaves the server in the foreground of that window:
+
+| Step | What it does |
+|---|---|
+| 1 | Finds a Python 3.8+ interpreter (`py -3`, then `python`, then `python3`) |
+| 2 | Creates `.venv`, or recreates it if an existing one is broken |
+| 3 | Installs `requirements.txt` (`httpx`) |
+| 4 | Writes `config.json` via [`scripts/win_setup.py`](../scripts/win_setup.py) |
+| 5 | Starts the server and opens `http://localhost:PORT/` in your browser |
+
+Press **Ctrl+C** in that window to stop. Arguments are passed straight through
+to the server, so `start.bat --port 9000 --api-key sk-secret` works.
+
+### Design decisions worth knowing
+
+**The generated `config.json` binds `127.0.0.1`, not `0.0.0.0`, and has no API
+keys.** A double-clicked launcher runs on somebody's desktop, and the obvious
+default would publish an unauthenticated proxy to every machine on the LAN.
+Localhost-only means only that computer can reach it, so auth-off is safe. To
+serve other machines, edit `config.json`:
+
+```json
+{ "host": "0.0.0.0", "api_keys": ["sk-your-long-random-key"] }
+```
+
+Read [SECURITY.md](SECURITY.md) before doing so.
+
+**An existing `config.json` is never modified.** Re-running the launcher reuses
+your settings, including a custom port — which the launcher reads back so it
+opens the right URL.
+
+**Python is detected by executing it, not by searching PATH.** Windows ships a
+Microsoft Store `python.exe` stub that opens the Store instead of running
+Python; the launcher verifies each candidate with a real version check and skips
+it if that fails.
+
+**A failed `pip install` is a warning, not a fatal error.** `httpx` is optional:
+without it the server still runs, but `stream: true` returns one buffered chunk
+instead of a real stream. Offline users still get a working server.
+
+**The window stays open on failure.** A launcher that exits immediately hides
+the reason it failed, so errors end in `pause`.
+
+### Running it from a terminal instead
+
+```bat
+cd C:\path\to\gemini-web2api
+start.bat
+```
+
+The launcher is a thin batch file; all JSON handling lives in
+`scripts/win_setup.py`, which is plain Python and can be inspected or run
+directly:
+
+```bat
+.venv\Scripts\python.exe scripts\win_setup.py
+```
+
+It prints `PORT=<n>` and `CREATED=<0|1>` on stdout for the batch file to parse,
+and everything human-readable on stderr.
 
 ---
 

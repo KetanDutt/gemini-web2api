@@ -1,9 +1,11 @@
 """HTTP endpoint behaviour: OpenAI, Responses, Google-native and status routes."""
 import base64
 import json
+import time
 import unittest
 from unittest import mock
 
+from gemini_web2api import metrics
 from gemini_web2api.models import MODELS
 from tests.support import ServerTestCase, decode_sse, sse_deltas
 
@@ -803,6 +805,202 @@ class KeepAliveTests(ServerTestCase):
     def test_content_length_is_exact(self):
         _status, headers, body = self.get("/")
         self.assertEqual(int(headers["Content-Length"]), len(body.encode("utf-8")))
+
+
+class RequestHistoryTests(ServerTestCase):
+    """The Activity tab's data source: /status exposes a bounded request log.
+
+    History carries client addresses, so it must never reach the public
+    dashboard state served from "/".
+    """
+
+    def setUp(self):
+        super().setUp()
+        metrics.reset()
+        self.addCleanup(metrics.reset)
+        self.CONFIG["history_max"] = 50
+
+    def _history(self):
+        status, _headers, body = self.get_json("/status")
+        self.assertEqual(status, 200)
+        return body["history"]
+
+    def test_status_exposes_history(self):
+        self.get("/health")
+        entries = self._history()
+        self.assertTrue(entries)
+        paths = [e["path"] for e in entries]
+        self.assertIn("/health", paths)
+
+    def test_entry_shape(self):
+        self.get("/health")
+        entry = next(e for e in self._history() if e["path"] == "/health")
+        for field in ("ts", "id", "method", "path", "status", "model", "ms", "client"):
+            self.assertIn(field, entry, f"history entry is missing {field!r}")
+        self.assertEqual(entry["method"], "GET")
+        self.assertEqual(entry["status"], 200)
+
+    def test_query_string_is_stripped(self):
+        """Query strings can carry ?key=<api_key>; they must not be retained."""
+        self.request("GET", "/?format=json&key=sk-super-secret")
+        entries = self._history()
+        self.assertTrue(entries)
+        for entry in entries:
+            self.assertNotIn("?", entry["path"])
+            self.assertNotIn("sk-super-secret", json.dumps(entry))
+
+    def test_errors_are_recorded(self):
+        self.get("/definitely-not-a-route")
+        statuses = {e["path"]: e["status"] for e in self._history()}
+        self.assertEqual(statuses.get("/definitely-not-a-route"), 404)
+
+    def test_resolved_model_is_recorded(self):
+        """An unknown model silently falls back; history shows what actually ran."""
+        with mock.patch("gemini_web2api.server.generate", return_value="ok"):
+            self.post_json("/v1/chat/completions",
+                           dict(CHAT_BODY, model="gemini-9.9-does-not-exist"))
+        entry = next(e for e in self._history() if e["path"] == "/v1/chat/completions")
+        self.assertEqual(entry["model"], "gemini-3.6-flash")
+
+    def test_history_max_zero_disables_it(self):
+        self.CONFIG["history_max"] = 0
+        self.get("/health")
+        self.assertEqual(self._history(), [])
+
+    def test_history_is_bounded_by_config(self):
+        self.CONFIG["history_max"] = 3
+        for _ in range(10):
+            self.get("/health")
+        self.assertLessEqual(len(self._history()), 3)
+
+    def test_streaming_upstream_failure_is_counted(self):
+        """Regression: a stream that failed mid-flight incremented neither
+        upstream_failures nor anything else, so an outage affecting only
+        streaming traffic looked like a healthy server. The HTTP status is
+        legitimately 200 - the header left before the failure - so the counter
+        is the only place the failure can be recorded."""
+        metrics.reset()
+        with mock.patch("gemini_web2api.server.generate_stream") as stream:
+            stream.side_effect = RuntimeError("TLS/SSL connection has been closed")
+            status, _headers, body = self.post(
+                "/v1/chat/completions", dict(CHAT_BODY, stream=True))
+        self.assertEqual(status, 200)
+        self.assertIn('"error"', body)
+        _s, _h, payload = self.get_json("/status")
+        self.assertEqual(payload["metrics"]["counters"]["upstream_failures"], 1)
+
+    def test_non_streaming_upstream_failure_is_also_counted(self):
+        """The two paths must agree, or the counter means different things
+        depending on how the client asked for the reply."""
+        metrics.reset()
+        with mock.patch("gemini_web2api.server.generate",
+                        side_effect=RuntimeError("boom")):
+            status, _headers, _body = self.post_json("/v1/chat/completions", CHAT_BODY)
+        self.assertEqual(status, 502)
+        _s, _h, payload = self.get_json("/status")
+        self.assertEqual(payload["metrics"]["counters"]["upstream_failures"], 1)
+
+    def test_streaming_duration_covers_the_whole_exchange(self):
+        """Regression: history was written when the SSE headers went out, so a
+        stream that took four seconds to generate was logged as time-to-first-
+        byte. The Activity tab's latency column was worse than useless."""
+        metrics.reset()
+
+        def slow_stream(*_args, **_kwargs):
+            yield "first"
+            time.sleep(0.25)
+            yield "last"
+
+        with mock.patch("gemini_web2api.server.generate_stream", slow_stream):
+            self.post("/v1/chat/completions", dict(CHAT_BODY, stream=True))
+
+        entry = next(e for e in self._history() if e["path"] == "/v1/chat/completions")
+        self.assertGreaterEqual(entry["ms"], 250.0,
+                                f"stream duration looks like time-to-first-byte: {entry['ms']}ms")
+        self.assertEqual(entry["status"], 200)
+
+    def test_non_streaming_duration_is_also_total(self):
+        """The two paths must measure the same thing."""
+        metrics.reset()
+
+        def slow_generate(*_args, **_kwargs):
+            time.sleep(0.2)
+            return "done"
+
+        with mock.patch("gemini_web2api.server.generate", slow_generate):
+            self.post_json("/v1/chat/completions", CHAT_BODY)
+        entry = next(e for e in self._history() if e["path"] == "/v1/chat/completions")
+        self.assertGreaterEqual(entry["ms"], 200.0)
+
+    def test_history_is_written_even_when_the_stream_fails(self):
+        """A failed stream must still appear in the log - that is exactly the
+        entry an operator is looking for."""
+        metrics.reset()
+        with mock.patch("gemini_web2api.server.generate_stream",
+                        side_effect=RuntimeError("upstream went away")):
+            self.post("/v1/chat/completions", dict(CHAT_BODY, stream=True))
+        entries = [e for e in self._history() if e["path"] == "/v1/chat/completions"]
+        self.assertEqual(len(entries), 1, f"expected exactly one entry, got {entries}")
+
+    def test_request_is_not_recorded_twice(self):
+        """_record() is idempotent and _finish_history() runs in a finally, so
+        an error response after an opened stream must not double-log."""
+        metrics.reset()
+        with mock.patch("gemini_web2api.server.generate_stream") as stream:
+            stream.return_value = iter(["ok"])
+            self.post("/v1/chat/completions", dict(CHAT_BODY, stream=True))
+        entries = [e for e in self._history() if e["path"] == "/v1/chat/completions"]
+        self.assertEqual(len(entries), 1)
+        _s, _h, payload = self.get_json("/status")
+        self.assertEqual(payload["metrics"]["counters"]["requests"], len(payload["history"]))
+
+    def test_streaming_request_is_counted(self):
+        """Regression: _start_sse() returned before _record(), so streamed
+        replies never appeared in requests_served or status_codes."""
+        with mock.patch("gemini_web2api.server.generate_stream") as stream:
+            stream.return_value = iter(["hello"])
+            self.post("/v1/chat/completions", dict(CHAT_BODY, stream=True))
+        status, _headers, body = self.get_json("/status")
+        self.assertEqual(status, 200)
+        self.assertGreaterEqual(body["metrics"]["counters"]["requests"], 1)
+        self.assertIn("200", body["metrics"]["status_codes"])
+        self.assertTrue(any(e["path"] == "/v1/chat/completions"
+                            for e in body["history"]))
+
+    def _dashboard_state(self):
+        _status, _headers, body = self.get("/", headers={"Accept": "text/html"})
+        marker = "const STATE = "
+        start = body.index(marker) + len(marker)
+        end = body.index(";\n", start)
+        return json.loads(body[start:end].replace("<\\/", "</"))
+
+    def test_history_is_absent_from_the_public_dashboard(self):
+        """/ is unauthenticated, so its embedded state must not carry history.
+
+        History entries are the only place a "client" or "ms" field appears, so
+        asserting those keys are absent proves no entry was serialised into the
+        page - a stronger check than looking for one known path, since routes
+        like /health legitimately appear in the documented endpoint list.
+        """
+        self.get("/health")
+        entries = self._history()
+        self.assertTrue(entries, "expected /status to expose history first")
+        self.assertTrue(any("client" in e for e in entries))
+
+        state = self._dashboard_state()
+        blob = json.dumps(state)
+        self.assertNotIn("history", state)
+        self.assertNotIn('"client"', blob)
+        self.assertNotIn('"ms"', blob)
+        # The page may say *whether* history is on, never *what* is in it.
+        self.assertIn("history_enabled", state)
+
+    def test_dashboard_state_leaks_no_request_ids(self):
+        """Each history entry carries its X-Request-Id; none may reach "/". """
+        _status, headers, _body = self.get("/health")
+        request_id = headers["X-Request-Id"]
+        self.assertIn(request_id, [e["id"] for e in self._history()])
+        self.assertNotIn(request_id, json.dumps(self._dashboard_state()))
 
 
 if __name__ == "__main__":

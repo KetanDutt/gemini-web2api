@@ -57,6 +57,12 @@ DEFAULT_CONFIG = {
     "cors_origin": "*",
     # Seconds to wait for in-flight requests to finish on shutdown.
     "shutdown_timeout_sec": 5,
+    # Number of recent requests kept for the dashboard's activity view and
+    # /status. 0 disables recording entirely. Entries hold operational facts
+    # only (method, path, status, model, latency) — never prompts or keys — but
+    # they do include client addresses, so they are served only from the
+    # auth-gated /status, not from the public dashboard render.
+    "history_max": 200,
 }
 
 # Deep copy: a shallow one would alias mutable defaults such as

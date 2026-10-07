@@ -21,7 +21,8 @@ from . import __version__
 from .config import CONFIG
 from .config import snapshot as config_snapshot
 from .gemini import HAS_HTTPX, generate, generate_stream, log
-from .metrics import inc, record_latency, record_status
+from .metrics import history as metrics_history
+from .metrics import inc, record_latency, record_request, record_status
 from .models import (
     MODE_CATEGORY,
     MODELS,
@@ -132,6 +133,14 @@ class GeminiHandler(BaseHTTPRequestHandler):
         self.request_id = uuid.uuid4().hex[:12]
         self._started = time.time()
         self._headers_sent = False
+        self._recorded = False
+        # History is written once, at the end of the request, so that a stream's
+        # recorded duration covers the whole exchange rather than its headers.
+        self._history_done = False
+        self._final_status = None
+        # Set by the handlers so request history can attribute a model without
+        # the recorder having to re-parse the body.
+        self._model_name = None
         super().__init__(*args, **kwargs)
 
     def log_message(self, fmt, *args):
@@ -207,10 +216,57 @@ class GeminiHandler(BaseHTTPRequestHandler):
         self.send_error_json(status, message, err_type, code)
 
     def _record(self, status):
+        """Count a response. Idempotent per request: the first status wins.
+
+        The SSE path records when the stream *opens*, because the 200 header is
+        already on the wire and must be counted even if the stream later fails
+        or the client disconnects. Everything else records on completion.
+
+        The history entry is written separately by :meth:`_finish_history`.
+        Recording it here instead would measure time-to-first-byte for streams:
+        a reply that took four seconds to generate was logged as 0.6ms, which
+        made the Activity tab's latency column actively misleading.
+        """
+        if self._recorded:
+            return
+        self._recorded = True
+        self._final_status = status
         with _count_lock:
             _request_count[0] += 1
         inc("requests")
         record_status(status)
+
+    def _finish_history(self):
+        """Append this request to history with its true total duration.
+
+        Called from a ``finally`` in each verb handler, so a stream that fails
+        mid-flight, or a client that disconnects, is still logged — and with the
+        elapsed time of the whole exchange rather than of the header flush.
+        """
+        if self._history_done:
+            return
+        self._history_done = True
+        status = self._final_status
+        if status is None:
+            # No response was ever produced (the connection broke first), so
+            # there is no counted request to describe.
+            return
+        limit = int(CONFIG.get("history_max") or 0)
+        if limit <= 0:
+            return
+        # Strip the query string: Google-native clients may pass ?key=<api_key>,
+        # and history is readable through /status.
+        path = self._split_path()[0]
+        record_request({
+            "ts": round(time.time(), 3),
+            "id": self.request_id,
+            "method": self.command,
+            "path": path,
+            "status": status,
+            "model": self._model_name,
+            "ms": round((time.time() - self._started) * 1000.0, 1),
+            "client": self.client_address[0] if self.client_address else None,
+        })
 
     def _start_sse(self):
         """Begin a text/event-stream response.
@@ -229,6 +285,10 @@ class GeminiHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.close_connection = True
         self._headers_sent = True
+        # An SSE body has no Content-Length and never passes through send_json,
+        # so without this streaming requests were absent from requests_served
+        # and from the status-code counts entirely.
+        self._record(200)
 
     def _sse_write(self, data, event=None):
         """Write one SSE frame. Returns False when the client has gone away."""
@@ -364,25 +424,32 @@ class GeminiHandler(BaseHTTPRequestHandler):
     # ─── verbs ───────────────────────────────────────────────────────────────
 
     def do_OPTIONS(self):
-        self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", CONFIG.get("cors_origin", "*"))
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, HEAD, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers",
-                         "Authorization, Content-Type, x-api-key, x-goog-api-key, x-request-id")
-        self.send_header("Access-Control-Max-Age", "86400")
-        self.send_header("Content-Length", "0")
-        self.end_headers()
+        try:
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", CONFIG.get("cors_origin", "*"))
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, HEAD, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers",
+                             "Authorization, Content-Type, x-api-key, x-goog-api-key, "
+                             "x-request-id")
+            self.send_header("Access-Control-Max-Age", "86400")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            self._record(204)
+        finally:
+            self._finish_history()
 
     def do_HEAD(self):
-        path, _ = self._split_path()
-        if path in ("/health", "/healthz", "/live", "/ready"):
-            self.send_response(200)
-        else:
-            self.send_response(404)
-        self.send_header("Content-Length", "0")
-        for key, value in self._cors_headers().items():
-            self.send_header(key, value)
-        self.end_headers()
+        try:
+            path, _ = self._split_path()
+            status = 200 if path in ("/health", "/healthz", "/live", "/ready") else 404
+            self.send_response(status)
+            self.send_header("Content-Length", "0")
+            for key, value in self._cors_headers().items():
+                self.send_header(key, value)
+            self.end_headers()
+            self._record(status)
+        finally:
+            self._finish_history()
 
     def do_GET(self):
         try:
@@ -395,6 +462,8 @@ class GeminiHandler(BaseHTTPRequestHandler):
                 self.send_error_json(500, f"internal error: {exc}", "api_error")
             except Exception:
                 self.close_connection = True
+        finally:
+            self._finish_history()
 
     def _route_get(self, path, query):
         is_api = path.startswith("/v1")
@@ -481,34 +550,37 @@ class GeminiHandler(BaseHTTPRequestHandler):
         self.send_json(detail)
 
     def do_POST(self):
-        # The body is read before authorisation so a rejected request cannot
-        # leave unread bytes on a keep-alive connection.
         try:
-            body = self._read_request_body()
-        except BufferError:
-            self.send_error_json(413, "request body too large", "invalid_request_error",
-                                 "payload_too_large")
-            return
-        except ValueError as exc:
-            self.send_error_json(400, str(exc), "invalid_request_error")
-            return
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            self.close_connection = True
-            return
-
-        try:
-            self._route_post(*self._split_path(), body=body)
-        except (BrokenPipeError, ConnectionResetError):
-            self.close_connection = True
-        except Exception as exc:
-            log(f"{self.request_id} POST error: {exc}", "error")
-            if self._headers_sent:
-                self._sse_done()
-                return
+            # The body is read before authorisation so a rejected request cannot
+            # leave unread bytes on a keep-alive connection.
             try:
-                self.send_error_json(500, f"internal error: {exc}", "api_error")
-            except Exception:
+                body = self._read_request_body()
+            except BufferError:
+                self.send_error_json(413, "request body too large", "invalid_request_error",
+                                     "payload_too_large")
+                return
+            except ValueError as exc:
+                self.send_error_json(400, str(exc), "invalid_request_error")
+                return
+            except (BrokenPipeError, ConnectionResetError, OSError):
                 self.close_connection = True
+                return
+
+            try:
+                self._route_post(*self._split_path(), body=body)
+            except (BrokenPipeError, ConnectionResetError):
+                self.close_connection = True
+            except Exception as exc:
+                log(f"{self.request_id} POST error: {exc}", "error")
+                if self._headers_sent:
+                    self._sse_done()
+                    return
+                try:
+                    self.send_error_json(500, f"internal error: {exc}", "api_error")
+                except Exception:
+                    self.close_connection = True
+        finally:
+            self._finish_history()
 
     def _route_post(self, path, query, body):
         is_api = path.startswith("/v1")
@@ -543,6 +615,9 @@ class GeminiHandler(BaseHTTPRequestHandler):
         if error:
             self.send_error_json(400, error, "invalid_request_error", "invalid_model")
             return None
+        # Record the resolved name (not the requested one) so history shows what
+        # actually served the request, including silent fallbacks.
+        self._model_name = name
         return name, model_id, think_mode, extra
 
     def _generate(self, prompt, model_id, think_mode, file_refs, extra_fields, model_name):
@@ -701,6 +776,12 @@ class GeminiHandler(BaseHTTPRequestHandler):
                     return
         except Exception as exc:
             failed = True
+            # Counted here rather than via _upstream_failure(), which cannot be
+            # used once the stream is open: it would try to send an HTTP error
+            # status after a 200 header has already gone out. Without this the
+            # counter only ever tracked non-streaming failures, so a server
+            # whose streams were all failing still looked healthy.
+            inc("upstream_failures")
             log(f"{self.request_id} stream error after {sum(map(len, collected))} chars: {exc}",
                 "error")
             self._sse_write({
@@ -1151,7 +1232,14 @@ class GeminiHandler(BaseHTTPRequestHandler):
         payload = self._health_payload()
         payload["config"] = config_snapshot()
         payload["config_file"] = None
-        payload["metrics"] = metrics_snapshot()
+        metrics = metrics_snapshot()
+        # History is kept out of the metrics snapshot itself: it can hold
+        # hundreds of entries and every /status poll would re-serialise them.
+        limit = int(CONFIG.get("history_max") or 0)
+        history = metrics_history(limit) if limit > 0 else []
+        metrics.pop("history", None)
+        payload["metrics"] = metrics
+        payload["history"] = history
         payload["rate_limit"] = LIMITER.snapshot()
         payload["python"] = platform.python_version()
         payload["platform"] = platform.platform()
@@ -1191,6 +1279,12 @@ class GeminiHandler(BaseHTTPRequestHandler):
                            if rate["enabled"] else "disabled"),
             "temporary_chats": bool(CONFIG.get("temporary_chats")),
             "requests_served": metrics["counters"]["requests"],
+            # The page is served from the public "/", so it may carry facts but
+            # not history: request history includes client addresses and is only
+            # available from the auth-gated /status. These flags let the UI
+            # explain what it can and cannot show.
+            "auth_enabled": bool(keys),
+            "history_enabled": int(CONFIG.get("history_max") or 0) > 0,
             "python": platform.python_version(),
             "warnings": self._startup_warnings()["warnings"],
             "models": [

@@ -6,11 +6,15 @@ existed twice in divergent copies.
 """
 import ast
 import importlib
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 try:
     import tomllib
@@ -542,6 +546,239 @@ class WorkerParityTests(unittest.TestCase):
             result.returncode, 0,
             f"node --check failed on cloudflare/worker.js:\n{result.stderr}",
         )
+
+
+class WindowsLauncherTests(unittest.TestCase):
+    """The one-click Windows launcher must be safe to double-click.
+
+    These are content assertions: a .bat cannot be executed on the Linux CI
+    runner, so the guards check the properties that make the difference between
+    a launcher that works and one that silently opens a window and vanishes.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.bat_path = os.path.join(REPO_ROOT, "start.bat")
+        cls.setup_path = os.path.join(REPO_ROOT, "scripts", "win_setup.py")
+        with open(cls.bat_path, encoding="utf-8") as handle:
+            # Batch files are CRLF on Windows; normalise so assertions are stable.
+            cls.bat = handle.read().replace("\r\n", "\n")
+        with open(cls.setup_path, encoding="utf-8") as handle:
+            cls.setup = handle.read()
+
+    def test_launcher_exists_at_the_repo_root(self):
+        self.assertTrue(os.path.exists(self.bat_path))
+
+    def test_echo_is_off(self):
+        """Without this, every command is echoed and the output is unreadable."""
+        self.assertTrue(self.bat.lstrip().lower().startswith("@echo off"))
+
+    def test_local_state_is_scoped(self):
+        self.assertIn("setlocal", self.bat)
+
+    def test_changes_to_its_own_directory(self):
+        """Double-clicking sets cwd to System32; relative paths would break."""
+        self.assertIn('cd /d "%~dp0"', self.bat)
+
+    def test_python_is_verified_by_execution_not_by_path(self):
+        """The Microsoft Store ships a python.exe stub that opens the Store.
+        Detection must actually run the interpreter and check the version."""
+        self.assertIn("sys.version_info>=(3,8)", self.bat)
+        for candidate in ("py -3", "python", "python3"):
+            self.assertIn(candidate, self.bat)
+
+    def test_uses_a_virtual_environment(self):
+        self.assertIn("-m venv", self.bat)
+        self.assertIn('set "VENV=%~dp0.venv"', self.bat)
+        # Built from VENV, so a path with spaces still resolves.
+        self.assertIn(r'set "VPY=%VENV%\Scripts\python.exe"', self.bat)
+
+    def test_installs_from_requirements(self):
+        """One source of truth for dependencies, not a hardcoded package list."""
+        self.assertIn("requirements.txt", self.bat)
+
+    def test_dependency_failure_is_not_fatal(self):
+        """httpx is optional: offline users must still get a running server."""
+        self.assertIn("WARNING: dependency installation failed", self.bat)
+
+    def test_paths_are_quoted(self):
+        """Spaces in the install path (C:\\Program Files, user names) are common."""
+        for fragment in ('"%VPY%"', '"%VENV%"', r'"%~dp0requirements.txt"',
+                         r'"%~dp0scripts\win_setup.py"'):
+            self.assertIn(fragment, self.bat, f"unquoted path: {fragment}")
+
+    def test_broken_venv_is_recreated(self):
+        self.assertIn("rmdir /s /q", self.bat)
+
+    def test_window_stays_open_on_failure(self):
+        """A launcher that exits immediately hides the reason it failed."""
+        self.assertIn("pause", self.bat)
+        self.assertIn(":fail", self.bat)
+
+    def test_launches_the_server_module(self):
+        self.assertIn("-m gemini_web2api", self.bat)
+
+    def test_opens_the_dashboard_after_a_delay(self):
+        """Opening the browser immediately races the socket bind."""
+        self.assertIn("Start-Sleep", self.bat)
+        self.assertIn("Start-Process", self.bat)
+        self.assertIn("http://localhost:%PORT%/", self.bat)
+
+    def test_extra_arguments_are_passed_through(self):
+        self.assertIn("%*", self.bat)
+
+    def test_cli_port_overrides_the_config(self):
+        self.assertIn("ARGPORT", self.bat)
+
+    def test_setup_helper_is_valid_python(self):
+        ast.parse(self.setup)
+
+    def test_setup_helper_defaults_to_localhost_only(self):
+        """A desktop launcher must not expose an open proxy to the LAN."""
+        self.assertIn('SAFE_HOST = "127.0.0.1"', self.setup)
+        self.assertIn('config["host"] = SAFE_HOST', self.setup)
+
+    def test_setup_helper_leaves_an_existing_config_alone(self):
+        self.assertIn("if os.path.exists(path)", self.setup)
+        self.assertIn("leaving it untouched", self.setup)
+
+    def test_setup_helper_reads_defaults_from_the_package(self):
+        """Copying config.example.json would drift; DEFAULT_CONFIG cannot.
+
+        The module docstring names config.example.json to explain why it is
+        *not* read, so only the code is scanned here.
+        """
+        self.assertIn("DEFAULT_CONFIG", self.setup)
+        self.assertIn("from gemini_web2api.config import DEFAULT_CONFIG", self.setup)
+
+        # Docstrings at every level name the template to explain why it is not
+        # read, so collect only string literals that are actual code.
+        tree = ast.parse(self.setup)
+        docstrings = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.FunctionDef,
+                                 ast.AsyncFunctionDef, ast.ClassDef)):
+                body = getattr(node, "body", None)
+                if body and isinstance(body[0], ast.Expr) and \
+                        isinstance(body[0].value, ast.Constant) and \
+                        isinstance(body[0].value.value, str):
+                    docstrings.add(id(body[0].value))
+        code_strings = [
+            node.value for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+            and id(node) not in docstrings
+        ]
+        offenders = [s for s in code_strings if "config.example.json" in s]
+        self.assertEqual(offenders, [],
+                         f"setup helper reads the template instead of DEFAULT_CONFIG: {offenders}")
+
+    def test_setup_helper_prints_a_parseable_contract(self):
+        self.assertIn('print(f"PORT={port}")', self.setup)
+        self.assertIn('print(f"CREATED={', self.setup)
+
+    def test_setup_helper_keeps_prose_off_stdout(self):
+        """stdout is parsed by the batch file, so messages must go to stderr."""
+        self.assertIn("file=sys.stderr", self.setup)
+
+    def test_launcher_is_git_tracked_and_not_ignored(self):
+        """A launcher that .gitignore swallows never reaches the user."""
+        result = subprocess.run(
+            [sys.executable, "-c",
+             "import subprocess,sys;"
+             "sys.exit(subprocess.run(['git','check-ignore','-q','start.bat']).returncode)"],
+            cwd=REPO_ROOT, capture_output=True)
+        self.assertEqual(result.returncode, 1, "start.bat is ignored by git")
+
+    def test_venv_is_ignored(self):
+        """The launcher creates .venv; it must never be committed."""
+        result = subprocess.run(["git", "check-ignore", "-q", ".venv/"],
+                                cwd=REPO_ROOT, capture_output=True)
+        self.assertEqual(result.returncode, 0, ".venv/ is not gitignored")
+
+
+class WindowsSetupHelperTests(unittest.TestCase):
+    """Behavioural tests for scripts/win_setup.py (the .bat itself cannot run)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+        self.addCleanup(sys.path.pop, 0)
+        for name in list(sys.modules):
+            if name == "win_setup":
+                del sys.modules[name]
+        self.mod = importlib.import_module("win_setup")
+        # The helper narrates its progress on stderr for the batch file's user.
+        # Swallow it here so stray chatter cannot mask a real failure in the
+        # test output; test_main_prints_the_contract_on_stdout checks stdout,
+        # which is the part the batch file actually parses.
+        patcher = mock.patch.object(self.mod, "say", lambda *a, **k: None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_creates_config_when_absent(self):
+        path = os.path.join(self.tmp, "config.json")
+        port, created = self.mod.ensure_config(path)
+        self.assertTrue(created)
+        self.assertEqual(port, 8081)
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        self.assertEqual(data["host"], "127.0.0.1")
+        self.assertEqual(data["api_keys"], [])
+
+    def test_generated_config_covers_every_default_key(self):
+        from gemini_web2api.config import DEFAULT_CONFIG
+        path = os.path.join(self.tmp, "config.json")
+        self.mod.ensure_config(path)
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        self.assertEqual(set(data), set(DEFAULT_CONFIG))
+
+    def test_is_idempotent(self):
+        path = os.path.join(self.tmp, "config.json")
+        self.mod.ensure_config(path)
+        with open(path, encoding="utf-8") as handle:
+            first = handle.read()
+        _port, created = self.mod.ensure_config(path)
+        self.assertFalse(created)
+        with open(path, encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), first)
+
+    def test_preserves_a_user_port(self):
+        path = os.path.join(self.tmp, "config.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump({"port": 9111, "host": "0.0.0.0"}, handle)
+        port, created = self.mod.ensure_config(path)
+        self.assertEqual(port, 9111)
+        self.assertFalse(created)
+        with open(path, encoding="utf-8") as handle:
+            self.assertEqual(json.load(handle)["host"], "0.0.0.0")
+
+    def test_survives_a_corrupt_config(self):
+        path = os.path.join(self.tmp, "config.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("{ this is not json")
+        port, created = self.mod.ensure_config(path)
+        self.assertEqual(port, 8081)
+        self.assertFalse(created)
+
+    def test_rejects_an_out_of_range_port(self):
+        path = os.path.join(self.tmp, "config.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump({"port": 99999}, handle)
+        port, _created = self.mod.ensure_config(path)
+        self.assertEqual(port, 8081)
+
+    def test_main_prints_the_contract_on_stdout(self):
+        import contextlib
+        import io
+        path = os.path.join(self.tmp, "config.json")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = self.mod.main([path])
+        self.assertEqual(code, 0)
+        lines = out.getvalue().strip().splitlines()
+        self.assertEqual(lines, ["PORT=8081", "CREATED=1"])
 
 
 class SyntaxTests(unittest.TestCase):

@@ -43,10 +43,13 @@ tests/
   test_models.py           model table and resolution
   test_protocol.py         payload, parsing, streaming
   test_tools.py            prompt building and call parsing
-  test_endpoints.py        every HTTP route
+  test_endpoints.py        every HTTP route, request history
   test_security.py         auth, SSRF, limits, rate limiting
-  test_metrics.py          metrics, health probe, dashboard rendering
-  test_packaging.py        build, shim, structure, docs presence
+  test_metrics.py          metrics, history ring, health probe, dashboard
+  test_packaging.py        build, shim, structure, docs, Windows launcher
+scripts/
+  win_setup.py             config generation for start.bat (plain Python)
+start.bat                  one-click Windows launcher
 docs/                      all documentation
 cloudflare/                independent Workers port
 gemini-cookie-sync-extension/  Chrome extension
@@ -125,6 +128,17 @@ touching these areas, keep the tests green:
 * `test_endpoints.RoutingTests.test_query_strings_do_not_break_routing`
 * `test_cookies.*` — every cookie format
 * `test_packaging.PyprojectTests.test_packages_are_declared_explicitly`
+* `test_endpoints.RequestHistoryTests.test_streaming_request_is_counted` —
+  `_start_sse()` used to return before `_record()`, so streamed replies never
+  appeared in `requests_served` or `status_codes`.
+* `test_endpoints.RequestHistoryTests.test_history_is_absent_from_the_public_dashboard`
+  and `test_dashboard_state_leaks_no_request_ids` — `GET /` is unauthenticated,
+  so history (which carries client addresses) must never be embedded in it.
+* `test_metrics.HistoryTests.test_history_is_not_in_the_snapshot` — same
+  invariant from the other side: `snapshot()` must stay history-free.
+* `test_packaging.WindowsLauncherTests.*` — the launcher cannot execute on the
+  Linux CI runner, so these are content guards. Each was verified to fail by
+  injecting the violation it forbids.
 
 ## Linting
 

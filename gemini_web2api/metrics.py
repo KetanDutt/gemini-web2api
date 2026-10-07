@@ -10,11 +10,17 @@ aggregating them would require a shared store this project does not have.
 """
 import threading
 import time
+from collections import deque
 
 _START = time.time()
 
 # Upper bounds (ms) for the latency histogram; the final bucket is "+inf".
 _LATENCY_BUCKETS = (50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000)
+
+# Hard ceiling on the retained request history. The number of entries actually
+# returned is min(history_max, this), so a misconfigured history_max cannot make
+# the buffer grow without bound in a long-lived process.
+HISTORY_CAP = 1000
 
 _lock = threading.Lock()
 _counters = {
@@ -33,6 +39,7 @@ _latency_sum = [0.0]
 _latency_count = [0]
 _by_model = {}
 _by_status = {}
+_history = deque(maxlen=HISTORY_CAP)
 
 
 def inc(name, amount=1):
@@ -69,6 +76,41 @@ def record_latency(model, seconds):
         entry["count"] += 1
         entry["ms_total"] += millis
         entry["ms_max"] = max(entry["ms_max"], millis)
+
+
+def record_request(entry):
+    """Append one entry to the bounded request history.
+
+    Entries hold operational facts only — method, path, status, model, latency,
+    request id, client. Never a prompt, a response body or a credential: this
+    buffer is reachable through ``/status`` and the dashboard, so anything
+    sensitive stored here would become readable by anyone who can reach them.
+    Callers must also strip query strings, which can carry ``?key=<api_key>``.
+
+    Anything that is not a dict is dropped rather than stored: this buffer is
+    serialised straight to JSON for a UI, so one malformed entry would break
+    the whole response.
+    """
+    if not isinstance(entry, dict):
+        return
+    with _lock:
+        _history.append(dict(entry))
+
+
+def history(limit=100):
+    """The most recent entries, newest first.
+
+    ``limit`` is a maximum, not a page size: ``limit <= 0`` returns nothing,
+    so a caller passing a disabled/zero budget can never receive the full
+    buffer by accident.
+    """
+    if not limit or limit <= 0:
+        return []
+    with _lock:
+        items = list(_history)[-limit:]
+    items.reverse()
+    # Copies, so a caller (or a JSON encoder hook) cannot mutate retained state.
+    return [dict(item) for item in items]
 
 
 def uptime():
@@ -115,3 +157,4 @@ def reset():
         _latency_count[0] = 0
         _by_model.clear()
         _by_status.clear()
+        _history.clear()

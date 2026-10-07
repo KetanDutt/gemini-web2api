@@ -32,11 +32,16 @@
 - **九个模型** —— Flash、扩展思考、Pro、Auto、Lite，思考深度可调
 - **可选鉴权** —— 默认开放；配置密钥后支持 Bearer / `x-api-key` / `x-goog-api-key`，并可选限流
 - **自愈能力** —— 自动刷新 Google 的构建标签（`bl`），前端改版不会导致服务失效
-- **Web 控制台** —— 打开 `http://localhost:8081/` 查看状态、模型列表，并可直接流式测试
+- **Web 控制台** —— 打开 `http://localhost:8081/`，含对话 Playground、实时状态、请求活动、模型选择与可直接粘贴的客户端配置
 - **生产级打包** —— 非 root Docker 镜像、健康检查、环境变量配置、优雅停机、CI
+- **Windows 一键启动** —— 双击 `start.bat` 即可创建虚拟环境、安装依赖、生成安全的 `config.json` 并启动服务
 - **零必需依赖** —— Python 3.8+，`httpx` 为可选
 
 ## 快速开始
+
+**Windows** —— 双击仓库根目录的 [`start.bat`](start.bat)。它会自动查找 Python、创建虚拟环境、安装依赖、生成一份绑定 `127.0.0.1` 的 `config.json`、启动服务并打开控制台，无需其他操作。
+
+**macOS / Linux**
 
 ```bash
 pip install httpx          # 可选，但流式输出需要它
@@ -316,9 +321,11 @@ curl -s http://localhost:8081/health | python3 -m json.tool   # 存活探测，�
 curl -s http://localhost:8081/status | python3 -m json.tool   # 指标 + 脱敏配置
 ```
 
-`/status` 返回请求计数、按状态码的错误计数、平均延迟、延迟直方图与按模型统计。也可以直接打开 `/` 的 Web 控制台，内容相同，另带一个可流式测试的 Playground。
+`/status` 返回请求计数、按状态码的错误计数、平均延迟、延迟直方图、按模型统计，以及最近请求的 `history` 数组。也可以直接打开 `/` 的 Web 控制台，内容相同，另带可流式测试的对话 Playground 与可筛选的活动日志。
 
-每个响应都带 `X-Request-Id`，并在服务端日志中回显。
+`history` 保留最近 `history_max` 条请求（默认 200，上限 1000，设为 `0` 即关闭），字段包括时间戳、`X-Request-Id`、方法、路径、状态码、**实际解析后的**模型、耗时与客户端地址。提示词、响应内容与凭据一律不记录，查询字符串也会被剥离。由于条目含客户端地址，`history` 仅通过需鉴权的 `/status` 提供，绝不会嵌入公开的 `GET /` 页面。
+
+每个响应都带 `X-Request-Id`，在服务端日志与 history 条目中同时回显，便于把浏览器里的一次请求对应到具体日志行。
 
 ## 文档
 
@@ -365,7 +372,7 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api tests
 ```
 
-417 个测试，全部离线运行——Gemini 协议在帧级别被模拟。CI 覆盖 Python 3.8–3.13、无第三方依赖的纯标准库运行、构建并安装 wheel 的校验、lint 与 Docker 构建。
+478 个测试，全部离线运行——Gemini 协议在帧级别被模拟。CI 覆盖 Python 3.8–3.13、无第三方依赖的纯标准库运行、构建并安装 wheel 的校验、lint 与 Docker 构建。
 
 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**
 

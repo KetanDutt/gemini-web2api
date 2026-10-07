@@ -146,6 +146,76 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(snap["status_codes"]["200"], 4000)
 
 
+class HistoryTests(unittest.TestCase):
+    """The bounded request-history ring behind the dashboard Activity tab."""
+
+    def setUp(self):
+        metrics.reset()
+        self.addCleanup(metrics.reset)
+
+    def _entry(self, **overrides):
+        entry = {
+            "ts": 1700000000.0, "id": "abc123", "method": "POST",
+            "path": "/v1/chat/completions", "status": 200,
+            "model": "gemini-3.6-flash", "ms": 12.5, "client": "127.0.0.1",
+        }
+        entry.update(overrides)
+        return entry
+
+    def test_empty_by_default(self):
+        self.assertEqual(metrics.history(), [])
+
+    def test_records_and_returns_newest_first(self):
+        metrics.record_request(self._entry(id="one"))
+        metrics.record_request(self._entry(id="two"))
+        got = metrics.history()
+        self.assertEqual([e["id"] for e in got], ["two", "one"])
+
+    def test_limit_is_honoured(self):
+        for i in range(10):
+            metrics.record_request(self._entry(id=f"r{i}"))
+        self.assertEqual(len(metrics.history(limit=3)), 3)
+        self.assertEqual(len(metrics.history(limit=0)), 0)
+
+    def test_ring_is_bounded_at_the_cap(self):
+        """A long-running server must not grow history without limit."""
+        over = metrics.HISTORY_CAP + 250
+        for i in range(over):
+            metrics.record_request(self._entry(id=f"r{i}"))
+        got = metrics.history(limit=metrics.HISTORY_CAP + 500)
+        self.assertEqual(len(got), metrics.HISTORY_CAP)
+        # Oldest entries were dropped; newest survived.
+        self.assertEqual(got[0]["id"], f"r{over - 1}")
+        self.assertEqual(got[-1]["id"], f"r{over - metrics.HISTORY_CAP}")
+
+    def test_non_dict_entries_are_ignored(self):
+        """A buggy call site must not corrupt the ring."""
+        metrics.record_request(None)
+        metrics.record_request("nope")
+        metrics.record_request(self._entry())
+        self.assertEqual(len(metrics.history()), 1)
+
+    def test_history_is_returned_as_copies(self):
+        """Callers must not be able to mutate retained state."""
+        metrics.record_request(self._entry())
+        first = metrics.history()
+        first[0]["path"] = "/tampered"
+        self.assertEqual(metrics.history()[0]["path"], "/v1/chat/completions")
+
+    def test_reset_clears_history(self):
+        metrics.record_request(self._entry())
+        metrics.reset()
+        self.assertEqual(metrics.history(), [])
+
+    def test_history_is_not_in_the_snapshot(self):
+        """snapshot() feeds the public dashboard state, which must not leak
+        client addresses. History is served only from auth-gated /status."""
+        metrics.record_request(self._entry(client="203.0.113.9"))
+        self.assertNotIn("history", metrics.snapshot())
+        snap = json.dumps(metrics.snapshot())
+        self.assertNotIn("203.0.113.9", snap)
+
+
 class HealthCheckTests(unittest.TestCase):
     def test_default_url_uses_standard_port(self):
         with mock.patch.dict(os.environ, {}, clear=True):
@@ -301,6 +371,39 @@ class DashboardTests(unittest.TestCase):
         """default=str keeps an unexpected object from taking down GET /."""
         html = webui.render_dashboard(self._state(weird=object())).decode("utf-8")
         self.assertIn("object object", html.replace("<", " ").replace(">", " "))
+
+    def test_chat_tab_is_present(self):
+        """The dashboard is a console, not just a status board."""
+        html = webui.render_dashboard(self._state(models=[])).decode("utf-8")
+        for marker in ('data-tab="chat"', "gw2a.convs", "v1/chat/completions"):
+            self.assertIn(marker, html, f"missing dashboard marker {marker}")
+
+    def test_activity_tab_is_present(self):
+        html = webui.render_dashboard(self._state(models=[])).decode("utf-8")
+        self.assertIn('data-tab="activity"', html)
+
+    def test_auth_flag_reaches_the_page(self):
+        """With auth on, the UI must tell the user a key is required."""
+        html = webui.render_dashboard(
+            self._state(models=[], auth_enabled=True, history_enabled=True)
+        ).decode("utf-8")
+        self.assertIn('"auth_enabled": true', html)
+        self.assertIn('"history_enabled": true', html)
+
+    def test_history_disabled_flag_reaches_the_page(self):
+        html = webui.render_dashboard(
+            self._state(models=[], auth_enabled=False, history_enabled=False)
+        ).decode("utf-8")
+        self.assertIn('"history_enabled": false', html)
+
+    def test_api_key_is_never_embedded_in_the_page(self):
+        """The page is served from the public "/", so state carries facts, not
+        secrets - and no key material either."""
+        html = webui.render_dashboard(
+            self._state(models=[], api_keys="1 configured", auth_enabled=True)
+        ).decode("utf-8")
+        self.assertNotIn("sk-demo-key", html)
+        self.assertNotIn("xsrf_token", html)
 
     def test_warnings_are_rendered(self):
         state = self._state(checks={"fatal": [], "warnings": ["auth is disabled"]})

@@ -85,10 +85,23 @@ with `gpt-4` or `claude-3-5-sonnet` during setup, and a hard 400 breaks their
 | Key | Default | Environment | CLI | Description |
 |---|---|---|---|---|
 | `log_requests` | `true` | `GEMINI_WEB2API_LOG_REQUESTS` | `--quiet` | Write request logs to stderr. |
+| `history_max` | `200` | `GEMINI_WEB2API_HISTORY_MAX` | — | Recent requests kept in memory for the dashboard's activity view and `/status`. `0` disables recording. |
 | — | `info` | — | `--log-level` | `debug`, `info`, `warning` or `error`. |
 
 `debug` adds per-frame HTTP logging and upload details. Start there when
 reporting a bug.
+
+History entries hold operational facts only — timestamp, request id, method,
+path, status, resolved model, latency and client address. They never contain a
+prompt, a response body or a credential, and the query string is stripped before
+recording because Google-native clients may pass `?key=<api_key>`. The buffer is
+capped in memory (at most 1000 entries regardless of `history_max`), so a
+long-lived process cannot grow without bound.
+
+Because entries include client addresses, history is served only from the
+auth-gated `/status` endpoint — it is not embedded in the public dashboard
+render. Set `history_max: 0` if you would rather not retain client addresses at
+all.
 
 ## Configuration sources
 

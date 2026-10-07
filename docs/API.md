@@ -313,8 +313,8 @@ Kubernetes readiness probe.
 
 ### GET /status
 
-Adds `config` (secrets redacted), `metrics` and `rate_limit`. Requires an API
-key when keys are configured.
+Adds `config` (secrets redacted), `metrics`, `rate_limit` and `history`.
+Requires an API key when keys are configured.
 
 ```json
 {
@@ -327,14 +327,34 @@ key when keys are configured.
     "latency_ms_avg": 1840.5, "latency_ms_samples": 512,
     "latency_histogram_ms": {"50": 0, "100": 0, "…": 0, "inf": 3},
     "models": {"gemini-3.6-flash": {"requests": 500, "avg_ms": 1830.1, "max_ms": 9204.7}}
-  }
+  },
+  "history": [
+    {"ts": 1760000000.1, "id": "9f2c1ab7d403", "method": "POST",
+     "path": "/v1/chat/completions", "status": 200,
+     "model": "gemini-3.6-flash", "ms": 1841.2, "client": "203.0.113.9"}
+  ]
 }
 ```
 
+`history` is the request log behind the dashboard's **Activity** tab: the most
+recent `history_max` requests (default 200, capped at 1000), newest first. Set
+`"history_max": 0` to disable it entirely.
+
+Entries hold operational facts only — timestamp, `X-Request-Id`, method, path,
+status, the **resolved** model (so a silent fallback from an unknown model name
+is visible), latency and client address. Prompts, response bodies and
+credentials are never stored, and query strings are stripped so a
+`?key=<api_key>` cannot be retained.
+
+Because entries include client addresses, `history` is served **only** from this
+auth-gated endpoint. It is deliberately excluded from `metrics` and from the
+state embedded in the public `GET /` dashboard, which carries an
+`history_enabled` flag instead of any entries.
+
 ### GET /
 
-Content-negotiated. A browser (`Accept: text/html`) gets the dashboard; anything
-else gets JSON:
+Content-negotiated. A browser (`Accept: text/html`) gets the web console;
+anything else gets JSON:
 
 ```json
 {"status": "ok", "version": "1.2.0", "models": ["gemini-3.7-flash", "…"],
@@ -342,6 +362,22 @@ else gets JSON:
 ```
 
 Force JSON from a browser with `/?format=json`.
+
+The console is a single self-contained page — no CDN, no fonts, no external
+requests, so it works air-gapped. It has five tabs:
+
+| Tab | What it does |
+|---|---|
+| **Chat** | A streaming playground. Keeps conversations in your browser's `localStorage`, supports multiple saved chats, model and thinking-depth selection, and a Stop button. Multi-turn works by resending the transcript, since Gemini's web endpoint is single-turn. |
+| **Status** | Runtime cards, health checks, counters, latency, histogram, per-model breakdown, status codes and the redacted config. Auto-refreshes every 10s. |
+| **Activity** | The `history` table from `/status`, filterable by all / errors / route. Auto-refreshes every 5s. |
+| **Models** | Every model with its category, output budget and whether it needs a cookie. |
+| **API** | Endpoint reference plus ready-to-paste client config and a `curl` example. |
+
+The **Status** and **Activity** tabs call `/status`, so when API keys are
+configured they need one pasted into the key field; it is stored in
+`localStorage` for that browser only and is never embedded in the page. Chat
+history stays client-side — the server keeps no conversation records.
 
 ---
 

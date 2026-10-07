@@ -24,5 +24,6 @@
   "rate_limit_max": 0,
   "rate_limit_window_sec": 60,
   "cors_origin": "*",
-  "shutdown_timeout_sec": 5
+  "shutdown_timeout_sec": 5,
+  "history_max": 200
 }
