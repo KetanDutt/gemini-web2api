@@ -217,13 +217,15 @@ touching these areas, keep the tests green:
   deployment with no cookie configured at all.
   The end-to-end tests key their fake transport on the **Cookie header**, not on
   a call counter, so "the other account was tried" is distinguishable from
-  "something happened twice". Eleven injections confirm the guards: no failover,
+  "something happened twice". Twelve injections confirm the guards: no failover,
   a 429 that does not rest the account, a 401 reusing the short cooldown, a
   cooldown ignored when picking, a lone credential skipped, an empty pool
   mistaken for "all accounts resting", a secondary file mutating global config,
   a cookie leaking into `/status`, `/status` forgetting the pool, `/metrics`
   exempting itself from the request counters, and the documented `/status`
-  sample drifting from the real shape.
+  sample drifting from the real shape, and two spellings of one cookie file
+  treated as two accounts (which would rotate to the same account it just
+  failed over from).
 * An `acquire(exclude=...)` parameter was written first, because it *looked*
   like the safety net for a 429. Injecting `acquire()` in its place left every
   rotation test passing: the failed credential is already cooled, so the round
@@ -310,7 +312,7 @@ the manifest was verified to fail the step with
 reports 23 skips rather than 12 unless `httpx` is installed, because the
 incremental-streaming tests gate on it — CI installs it first.
 
-Expect **630 tests and 12 skips** from an extracted sdist: 5 git-dependent and
+Expect **631 tests and 12 skips** from an extracted sdist: 5 git-dependent and
 7 repository-metadata. Anything else means either a file stopped shipping or a
 guard started skipping for a new reason. `test_the_sdist_ships_every_file_the_docs_promise`
 guards the first half automatically.

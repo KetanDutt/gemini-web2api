@@ -285,10 +285,18 @@ def configured_cookie_files():
     if not isinstance(extras, (list, tuple)):
         extras = []
     files = []
+    seen = set()
     for path in [primary] + list(extras):
         if not isinstance(path, str) or not path:
             continue
-        if path not in files:
+        # De-duplicated by real path, not by the string. `/tmp/a.json` and
+        # `/private/tmp/a.json` are one file, and listing both would build a pool
+        # of two credentials carrying the *same* cookie: rotation would report
+        # itself as active while a "failover" landed on the account that was
+        # already rate limited. The operator's own spelling is kept for messages.
+        key = os.path.realpath(path)
+        if key not in seen:
+            seen.add(key)
             files.append(path)
     return files
 

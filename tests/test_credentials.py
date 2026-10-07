@@ -269,6 +269,35 @@ class CookieFilePoolTests(ConfigTestCase):
         self.assertEqual(len(gemini.load_credentials()), 1)
         self.assertFalse(gemini._credentials.rotating)
 
+    def test_the_same_file_spelled_two_ways_is_one_credential(self):
+        """Two spellings of one path are one account, not two.
+
+        `/tmp/a.json` and `/private/tmp/a.json` name the same file on macOS, and a
+        symlink does the same anywhere. A pool holding both would advertise itself
+        as rotating while carrying the same cookie twice, so a "failover" from a
+        rate-limited account would land on the account that is rate limited —
+        rotation that reports success and changes nothing. On platforms where the
+        two spellings really are one path this test is the guard; elsewhere it
+        still passes, because two genuinely different paths stay two credentials.
+        """
+        primary = self.write("a.json", auth_file(COOKIE_A, "sapisidAAA"))
+        linked = os.path.join(self.tmp, "same.json")
+        try:
+            os.symlink(primary, linked)
+        except (OSError, NotImplementedError, AttributeError):
+            self.skipTest("symlinks are unavailable on this platform")
+        # Fixture first: prove the two spellings really are one file, so a pass
+        # below cannot come from the symlink having failed to resolve.
+        self.assertEqual(os.path.realpath(primary), os.path.realpath(linked))
+        self.CONFIG["cookie_file"] = primary
+        self.CONFIG["cookie_files"] = [linked]
+        self.assertEqual(
+            len(gemini.load_credentials()), 1,
+            "one file named two ways must be one credential, or the pool rotates "
+            "between two copies of the same account and a failover lands on the "
+            "account that is already rate limited")
+        self.assertEqual(len(gemini.configured_cookie_files()), 1)
+
     def test_each_account_keeps_its_own_auth_user(self):
         """The bug this guards: a pool that rotates cookies but not the account
         index addresses the wrong account — or none — on every failover."""
