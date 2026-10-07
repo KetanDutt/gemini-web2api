@@ -1,19 +1,20 @@
 Gemini Cookie Sync v1.0
 
-Purpose:
-- Read cookies for the current Google/Gemini session.
-- Extract the XSRF token named SNlM0e from the Gemini page.
-- Extract gemini_bl from cfb2h or from page requests when available.
-- Export `gemini-auth.json` locally only.
+A Chrome extension that exports the current signed-in Gemini session for use
+with gemini-web2api.
 
-Installation:
-1. Open `chrome://extensions`
-2. Enable Developer mode
-3. Click Load unpacked
-4. Select this folder
-5. Open `https://gemini.google.com/app`, sign in, and refresh the page
-6. Click Inspect session
-7. Click Export `gemini-auth.json`
+What it exports into gemini-auth.json:
+  - Google session cookies (including SAPISID)
+  - the XSRF token, exposed in the page as SNlM0e
+  - the build tag, from cfb2h when available
+  - the signed-in account index (auth_user)
+
+Install and use:
+  see SETUP.md in this folder. It is the single source of truth for the install
+  steps and for how the exported file is consumed; this file is only a summary
+  so the two cannot drift apart.
 
 Security:
-The generated file represents the real Google session and must be treated as secret. Do not send it, print it, or commit it to Git.
+  gemini-auth.json IS a real Google session and grants access to the whole
+  account, not just Gemini. Treat it as a secret: chmod 600 it, never print it,
+  never paste it into an issue, and never commit it to Git. It is gitignored.

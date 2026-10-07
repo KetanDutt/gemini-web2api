@@ -440,10 +440,15 @@ function getRandomSecChUaPlatform() {
 //   4 = AUTO（自动选择思考深度，由 Gemini 决定）
 
 var MODELS = {
+  'gemini-3.7-flash': {
+    mode: 1,        // FAST - 快速模式
+    think: 4,       // AUTO - 自动选择思考深度
+    desc: 'Latest all-around model (Gemini 3.7 Flash)',
+  },
   'gemini-3.6-flash': {
     mode: 1,        // FAST - 快速模式
     think: 4,       // AUTO - 自动选择思考深度
-    desc: 'Latest all-around model (Gemini 3.6 Flash)',
+    desc: 'All-around model (Gemini 3.6 Flash)',
   },
   'gemini-3.5-flash': {
     mode: 1,        // FAST
@@ -1170,15 +1175,24 @@ async function geminiStreamGenerate(prompt, modelId, thinkMode, config) {
       }, config.requestTimeoutSec * 1000);
 
       // 发送 HTTP POST 请求
-      var response = await fetch(url, {
-        method: 'POST',
-        headers: headers,
-        body: body,
-        signal: controller.signal,  // 关联中止信号
-      });
-
-      // 请求成功，清除超时定时器
-      clearTimeout(timeout);
+      // clearTimeout 必须放在 finally 里，不能只放在成功路径上：
+      // fetch 抛错（网络失败、DNS、被中止）时会直接跳到外层 catch，
+      // 于是每一次失败的上游请求都会留下一个悬挂 requestTimeoutSec 秒
+      // 的定时器。重试循环最多叠加 retryAttempts 个，既浪费 isolate
+      // 的存活时间与内存，也会拖住任何在 Workers 之外执行本文件的
+      // 事件循环（例如测试）。下方的流式分支已经用 finally 处理了
+      // 同样的问题，此处与其保持一致。
+      var response;
+      try {
+        response = await fetch(url, {
+          method: 'POST',
+          headers: headers,
+          body: body,
+          signal: controller.signal,  // 关联中止信号
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
 
       // ============================================================
       // 错误状态码处理
@@ -1415,6 +1429,59 @@ function extractResponseText(raw) {
  *   每个工具格式: { type: "function", function: { name, description, parameters } }
  * @returns {string} 转换后的提示文本
  */
+// ============================================================================
+// 🖼️ 多模态部分的文本提取
+// ============================================================================
+
+/**
+ * 从多模态内容数组中提取文本，并报告被丢弃的部分。
+ *
+ * 本部署不支持图片输入：Worker 没有实现 Google 的图片上传协议，因此
+ * `image_url` / `input_image` / `inlineData` 之类的部分只能被丢弃。
+ *
+ * 早前的实现是**静默**丢弃的：客户端问“这张图里是什么”，Worker 只把文字
+ * 发给 Gemini，模型于是对着一张它从未收到的图片自信作答。这比报错更糟，
+ * 因为响应看起来完全正常。这里改为把丢弃这件事写进提示词，让模型明确知道
+ * 有内容缺失、不要去描述或推测它。
+ *
+ * @param {Array} content - 多模态内容数组
+ * @param {Array<string>} textTypes - 视为文本的 `type` 值
+ * @returns {{text: string, dropped: Array<string>}} 文本与被丢弃部分的类型
+ */
+function extractTextParts(content, textTypes) {
+  var text = [];
+  var dropped = [];
+  for (var i = 0; i < content.length; i++) {
+    var c = content[i];
+    if (!c || typeof c !== 'object') continue;
+    if (textTypes.indexOf(c.type) !== -1) {
+      text.push(c.text || '');
+    } else if (c.inlineData || c.inline_data || c.fileData || c.file_data) {
+      dropped.push('inlineData');
+    } else if (c.type) {
+      dropped.push(c.type);
+    }
+  }
+  return { text: text.join(' '), dropped: dropped };
+}
+
+/**
+ * 把被丢弃的部分转成一句写进提示词的说明；没有丢弃时返回空字符串。
+ *
+ * @param {Array<string>} dropped - 被丢弃部分的类型列表
+ * @returns {string} 提示词补充说明
+ */
+function describeDroppedParts(dropped) {
+  if (!dropped || dropped.length === 0) return '';
+  var kinds = {};
+  for (var i = 0; i < dropped.length; i++) kinds[dropped[i]] = true;
+  return ' [Note: ' + dropped.length + ' non-text part(s) (' +
+    Object.keys(kinds).join(', ') + ') were sent with this message, but this ' +
+    'deployment does not support image or file input, so they were omitted and ' +
+    'their contents are unknown to you. Do not describe, guess or imply that ' +
+    'you can see them; say that the attachment could not be processed.]';
+}
+
 function messagesToPrompt(messages, tools) {
   // 存储各个消息段的数组
   var parts = [];
@@ -1461,16 +1528,10 @@ function messagesToPrompt(messages, tools) {
 
     // 如果内容是数组（多模态消息），提取文本部分
     // 例如: [{ type: "text", text: "Hello" }, { type: "image_url", ... }]
-    // 只提取 type 为 "text" 或 "input_text" 的部分
+    // 非文本部分无法处理，但会在提示词中显式说明，不再静默丢弃
     if (Array.isArray(content)) {
-      var textParts = [];
-      for (var ci = 0; ci < content.length; ci++) {
-        var c = content[ci];
-        if (c.type === 'text' || c.type === 'input_text') {
-          textParts.push(c.text || '');
-        }
-      }
-      content = textParts.join(' ');
+      var extracted = extractTextParts(content, ['text', 'input_text', 'output_text']);
+      content = extracted.text + describeDroppedParts(extracted.dropped);
     }
 
     // 根据角色进行不同的格式化
@@ -1615,11 +1676,19 @@ function googleContentsToPrompt(req) {
     var content = contents[ci];
     var role = content.role || 'user';
     var textParts = [];
+    var droppedParts = [];
     var partsArr = content.parts || [];
     for (var pi = 0; pi < partsArr.length; pi++) {
-      if (partsArr[pi].text) textParts.push(partsArr[pi].text);
+      var pp = partsArr[pi];
+      if (!pp || typeof pp !== 'object') continue;
+      if (pp.text) {
+        textParts.push(pp.text);
+      } else if (pp.inlineData || pp.inline_data ||
+                 pp.fileData || pp.file_data) {
+        droppedParts.push('inlineData');
+      }
     }
-    var text = textParts.join(' ');
+    var text = textParts.join(' ') + describeDroppedParts(droppedParts);
 
     // model 角色 → Assistant 前缀
     if (role === 'model') {
@@ -2318,12 +2387,12 @@ async function handleResponses(request, body, config) {
       // 其他格式的消息
       var content = item.content;
       if (Array.isArray(content)) {
-        var textParts = [];
-        for (var j = 0; j < content.length; j++) {
-          var c = content[j];
-          if (c.type === 'output_text') textParts.push(c.text || '');
-        }
-        content = textParts.join(' ');
+        // input_text 是 Responses API 用户输入的类型，output_text 是助手输出的
+        // 类型。此前只接受 output_text，于是用户发来的 input_text 被整段丢弃，
+        // 请求以 400 "empty input" 失败——文字并没有缺失，只是没被读取。
+        var extracted = extractTextParts(
+          content, ['input_text', 'output_text', 'text']);
+        content = extracted.text + describeDroppedParts(extracted.dropped);
       }
       messages.push({ role: item.role || 'user', content: content });
     }
@@ -2586,7 +2655,7 @@ export default {
       if (path === '/' || path === '/health') {
         return sendJSON({
           status: 'ok',
-          version: '1.5.0-cf-multifingerprint',
+          version: '1.6.2-cf-multifingerprint',
           platform: 'Cloudflare Workers',
           models: Object.keys(MODELS),
           defaultModel: config.defaultModel,
@@ -2667,9 +2736,27 @@ export default {
         return handleGoogleAPI(request, body, false, config);
       }
 
+      // ---- 明确不支持的端点 ----
+      // 这些端点的语义与聊天补全完全不同（向量 / 语音 / 图片），
+      // 兜底转为 chat 只会返回误导性的 400 "empty prompt"，
+      // 并且在请求体恰好带有 messages 时白白消耗一次真实的 Gemini 调用。
+      // 与 Python 版本和 docs/API.md 保持一致：明确返回 501。
+      if (path === '/v1/embeddings' ||
+          path === '/v1/audio/speech' ||
+          path === '/v1/images/generations') {
+        return sendJSON({
+          error: {
+            message: path + ' is not implemented by gemini-web2api',
+            type: 'invalid_request_error',
+            code: 'unsupported_endpoint',
+            param: null,
+          },
+        }, 501);
+      }
+
       // ---- 万能兜底路由 ----
-      // 所有 /v1/ 下的未匹配 POST 请求都自动转为 chat 处理
-      // 兼容各种客户端的路径差异
+      // 其余 /v1/ 下的未匹配 POST 请求仍自动转为 chat 处理，
+      // 以兼容各种客户端的路径差异（这是有意为之的宽容行为）。
       if (path.indexOf('/v1/') === 0) {
         return handleChatCompletions(request, body, config);
       }

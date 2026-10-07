@@ -1,0 +1,176 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # The project claims >=3.8, so the floor is tested explicitly.
+        python-version: ["3.8", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install httpx
+
+      - name: Run the test suite
+        run: |
+          # No pipeline here on purpose. Actions' default shell is `bash -e`
+          # WITHOUT pipefail, so `unittest ... | tee` would report tee's exit
+          # status and a failing suite would still pass. Capture the status,
+          # always show the output and the skip audit, then re-raise it.
+          rc=0
+          python -m unittest discover -s tests -t . -v > /tmp/out.txt 2>&1 || rc=$?
+          cat /tmp/out.txt
+          echo "--- toolchain the skip-gated guards depend on ---"
+          echo "node: $(command -v node >/dev/null 2>&1 && node --version || echo MISSING)"
+          echo "git:  $(command -v git >/dev/null 2>&1 && git --version || echo MISSING)"
+          echo "--- skipped tests ---"
+          grep -E '\.\.\. skipped' /tmp/out.txt || echo "  (none)"
+          skips=$(grep -cE '\.\.\. skipped' /tmp/out.txt || true)
+          echo "--- failing tests ---"
+          # Also emitted as annotations. Job logs live on storage the API
+          # cannot always reach, but annotations are readable from
+          # `check-runs/<id>/annotations` regardless — which is the only
+          # reason this step's skip audit was diagnosable at all. A failure
+          # that can only be read from a log nobody can fetch costs a round
+          # trip through a local reproduction just to identify.
+          grep -E '^(FAIL|ERROR): ' /tmp/out.txt > /tmp/failures.txt || true
+          grep -E '^(AssertionError|[A-Za-z.]*Error: |[A-Za-z.]*Exception)' /tmp/out.txt > /tmp/reasons.txt || true
+          while IFS= read -r line; do
+            echo "::error title=failing-test::${line}"
+          done < /tmp/failures.txt
+          while IFS= read -r line; do
+            echo "::error title=reason::${line}"
+          done < /tmp/reasons.txt
+          # Annotations are readable from the API even when job logs are not,
+          # so a silently-skipping guard cannot hide behind a green checkmark.
+          echo "::notice title=test-suite::exit=${rc} skipped=${skips} node=$(command -v node >/dev/null 2>&1 && node --version || echo MISSING)"
+          exit ${rc}
+
+  test-without-httpx:
+    name: stdlib-only fallback
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Verify the server imports and serves with no third-party packages
+        run: |
+          python -c "import gemini_web2api.gemini as g; assert not g.HAS_HTTPX, 'httpx should be absent'"
+          python -m unittest discover -s tests -t . -v
+
+  package:
+    name: build & install
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build
+
+      # Regression guard: flat-layout auto-discovery used to fail outright on
+      # `cloudflare/` + `gemini_web2api/`, so the package could not be built.
+      - name: Build sdist and wheel
+        run: python -m build
+
+      # A working tree and a `git archive` checkout both carry every tracked
+      # file, so neither can reveal what MANIFEST.in decided to ship - only an
+      # extracted sdist can. This is the check that caught a manifest omitting
+      # the Dockerfile, the shim and the logo its own docs told readers to use.
+      - name: Run the suite from the extracted sdist
+        run: |
+          python -m pip install --quiet httpx
+          rm -rf /tmp/sdist && mkdir -p /tmp/sdist
+          tar -xzf dist/*.tar.gz -C /tmp/sdist
+          cd /tmp/sdist/*/
+          rc=0
+          python -m unittest discover -s tests -t . > /tmp/sd.txt 2>&1 || rc=$?
+          cat /tmp/sd.txt
+          # Compare against the count the README documents rather than a number
+          # written here. The README's figure is already enforced against the
+          # repository suite by test_documentation_consistency, so deriving the
+          # expectation from it cannot drift - whereas a literal in this file
+          # went stale the moment the suite grew, and nothing caught it.
+          # This is also what stops the step passing vacuously: unittest exits 0
+          # on a smaller suite, so a MANIFEST.in that shipped fewer test files
+          # would otherwise look green while covering less.
+          ran=$(sed -nE 's/^Ran ([0-9]+) tests.*/\1/p' /tmp/sd.txt | head -1)
+          expected=$(sed -nE 's/^([0-9]{2,4}) tests,.*/\1/p' README.md | head -1)
+          skipped=$(sed -nE 's/.*skipped=([0-9]+).*/\1/p' /tmp/sd.txt | head -1)
+          echo "::notice title=sdist-suite::exit=${rc} ran=${ran:-?} expected=${expected:-?} skipped=${skipped:-0}"
+          if [ -z "${ran}" ] || [ -z "${expected}" ]; then
+            echo "::error title=sdist-suite::could not compare counts (ran='${ran}' expected='${expected}')"
+            rc=1
+          elif [ "${ran}" -ne "${expected}" ]; then
+            echo "::error title=sdist-suite::the sdist ran ${ran} tests but the README documents ${expected} - MANIFEST.in is not shipping the whole suite"
+            rc=1
+          fi
+          exit ${rc}
+
+      - name: Install the wheel into a clean venv
+        run: |
+          python -m venv /tmp/wheelenv
+          /tmp/wheelenv/bin/pip install dist/*.whl httpx
+
+      - name: Verify the console script
+        run: |
+          /tmp/wheelenv/bin/gemini-web2api --version
+          /tmp/wheelenv/bin/gemini-web2api --help
+
+      - name: Verify the compatibility shim
+        run: python gemini_web2api.py --version
+
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip "ruff>=0.5"
+      - name: ruff
+        run: ruff check gemini_web2api.py gemini_web2api tests scripts
+      - name: compile check
+        run: python -m compileall -q gemini_web2api.py gemini_web2api tests scripts
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build the image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          tags: gemini-web2api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
