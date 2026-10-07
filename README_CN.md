@@ -373,7 +373,7 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api tests
 ```
 
-520 个测试，全部离线运行——Gemini 协议在帧级别被模拟。CI 覆盖 Python 3.8–3.13、无第三方依赖的纯标准库运行、构建并安装 wheel 的校验、lint 与 Docker 构建。
+527 个测试，全部离线运行——Gemini 协议在帧级别被模拟。CI 覆盖 Python 3.8–3.13、无第三方依赖的纯标准库运行、构建并安装 wheel 的校验、lint 与 Docker 构建。
 
 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**
 
@@ -387,9 +387,9 @@ ruff check gemini_web2api tests
 
 [`cloudflare/`](cloudflare/README.MD) 是一个独立的无服务器移植版本，支持多 cookie 轮换、浏览器指纹轮换与请求抖动。文档为中文。
 
-它**不是**从 Python 代码构建的，两者在两个方向上都有差异。Worker 额外提供多账号 cookie 轮换、指纹轮换与请求抖动；但缺少图片输入（图片部分会被**静默丢弃**）、`/v1/completions`、`/ready` 与 `/status` 探针，且任何未匹配的 `POST /v1/*` 都会被转发到 chat completions 而不是返回 501。它收录 8 个模型，本服务为 9 个——缺少 `gemini-3.1-pro-enhanced`，因为该模型需要的 payload 槽位 Worker 并未分配。选型前请阅读[差异对照表](cloudflare/README.MD#-与-python-版本的差异)。
+它**不是**从 Python 代码构建的，两者在两个方向上都有差异。Worker 额外提供多账号 cookie 轮换、指纹轮换与请求抖动；但缺少图片输入（无法处理的图片部分会在提示词中明确告知模型，而非静默丢弃）、`/v1/completions`、`/ready` 与 `/status` 探针，且任何未匹配的 `POST /v1/*` 都会被转发到 chat completions 而不是返回 501。它收录 8 个模型，本服务为 9 个——缺少 `gemini-3.1-pro-enhanced`，因为该模型需要的 payload 槽位 Worker 并未分配。选型前请阅读[差异对照表](cloudflare/README.MD#-与-python-版本的差异)。
 
-两者的版本号是独立序列：Worker 为 `1.6.1-cf-multifingerprint`，本包为 `1.2.0`。
+两者的版本号是独立序列：Worker 为 `1.6.2-cf-multifingerprint`，本包为 `1.2.0`。
 
 ## 致谢
 

@@ -422,7 +422,7 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api tests
 ```
 
-520 tests, all offline — the Gemini wire protocol is faked at the frame level.
+527 tests, all offline — the Gemini wire protocol is faked at the frame level.
 CI covers Python 3.8–3.13, a stdlib-only run with no third-party packages, a
 build-and-install-the-wheel check, lint and a Docker build.
 
@@ -443,8 +443,9 @@ Documentation is in Chinese.
 
 It is **not** built from the Python code, and the two diverge in both
 directions. The Worker adds multi-account cookie rotation, fingerprint rotation
-and request jitter; it lacks image input (image parts are **silently
-discarded**), `/v1/completions`, and the `/ready` and `/status` probes, and it
+and request jitter; it lacks image input (image parts cannot be
+processed, and since 1.6.2 the model is told so in the prompt instead of
+being left to describe an image it never received), `/v1/completions`, and the `/ready` and `/status` probes, and it
 routes any unmatched `POST /v1/*` to chat completions rather than returning 501.
 It also ships 8 models versus this server's 9 — it lacks
 `gemini-3.1-pro-enhanced`, which needs payload slots the Worker does not
@@ -452,7 +453,7 @@ allocate. Read the
 [divergence table](cloudflare/README.MD#-与-python-版本的差异) before choosing.
 
 Version numbers are independent sequences: the Worker is
-`1.6.1-cf-multifingerprint`, this package is `1.2.0`.
+`1.6.2-cf-multifingerprint`, this package is `1.2.0`.
 
 ## Acknowledgments
 

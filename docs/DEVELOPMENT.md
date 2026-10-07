@@ -165,6 +165,18 @@ touching these areas, keep the tests green:
   `requestTimeoutSec`, so a regression cannot finish inside `MAX_SECONDS`.
   Skips when Node is absent, and runs from the sdist because `MANIFEST.in` ships
   `cloudflare/`.
+* `test_packaging.WorkerImageHandlingTests` — the same execution harness, pointed
+  at multimodal bodies. The `fetch` stub here records the **form-encoded request
+  body** and decodes it before throwing, so the assertions read the exact prompt
+  Gemini would have received rather than inferring it from a status code. That
+  is the only way to test this defect at all: the Worker answered 502 either way,
+  and before 1.6.2 it discarded image parts while looking completely healthy.
+  Coverage spans all three protocol routes, because each parses multimodal
+  content in its own place and each had to be fixed separately — asserting one
+  would have left two silently discarding. The control cases are what make the
+  suite mean something: they require text-only requests and a `null` content part
+  to come out *unannotated*, so "fixed" is distinguishable from "appends the
+  note to everything". Shares `_run_worker_harness` with `WorkerRoutingTests`.
 * `test_packaging.CIWorkflowTests` — CI must fail when the suite fails. Actions'
   default shell on Linux is `bash -e {0}`, **without** `pipefail`, so
   `python -m unittest ... | tee log` reports `tee`'s status and a failing suite
@@ -245,7 +257,7 @@ the manifest was verified to fail the step with
 reports 23 skips rather than 12 unless `httpx` is installed, because the
 incremental-streaming tests gate on it — CI installs it first.
 
-Expect **520 tests and 12 skips** from an extracted sdist: 5 git-dependent and
+Expect **527 tests and 12 skips** from an extracted sdist: 5 git-dependent and
 7 repository-metadata. Anything else means either a file stopped shipping or a
 guard started skipping for a new reason. `test_the_sdist_ships_every_file_the_docs_promise`
 guards the first half automatically.

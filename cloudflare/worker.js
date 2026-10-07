@@ -1429,6 +1429,59 @@ function extractResponseText(raw) {
  *   每个工具格式: { type: "function", function: { name, description, parameters } }
  * @returns {string} 转换后的提示文本
  */
+// ============================================================================
+// 🖼️ 多模态部分的文本提取
+// ============================================================================
+
+/**
+ * 从多模态内容数组中提取文本，并报告被丢弃的部分。
+ *
+ * 本部署不支持图片输入：Worker 没有实现 Google 的图片上传协议，因此
+ * `image_url` / `input_image` / `inlineData` 之类的部分只能被丢弃。
+ *
+ * 早前的实现是**静默**丢弃的：客户端问“这张图里是什么”，Worker 只把文字
+ * 发给 Gemini，模型于是对着一张它从未收到的图片自信作答。这比报错更糟，
+ * 因为响应看起来完全正常。这里改为把丢弃这件事写进提示词，让模型明确知道
+ * 有内容缺失、不要去描述或推测它。
+ *
+ * @param {Array} content - 多模态内容数组
+ * @param {Array<string>} textTypes - 视为文本的 `type` 值
+ * @returns {{text: string, dropped: Array<string>}} 文本与被丢弃部分的类型
+ */
+function extractTextParts(content, textTypes) {
+  var text = [];
+  var dropped = [];
+  for (var i = 0; i < content.length; i++) {
+    var c = content[i];
+    if (!c || typeof c !== 'object') continue;
+    if (textTypes.indexOf(c.type) !== -1) {
+      text.push(c.text || '');
+    } else if (c.inlineData || c.inline_data || c.fileData || c.file_data) {
+      dropped.push('inlineData');
+    } else if (c.type) {
+      dropped.push(c.type);
+    }
+  }
+  return { text: text.join(' '), dropped: dropped };
+}
+
+/**
+ * 把被丢弃的部分转成一句写进提示词的说明；没有丢弃时返回空字符串。
+ *
+ * @param {Array<string>} dropped - 被丢弃部分的类型列表
+ * @returns {string} 提示词补充说明
+ */
+function describeDroppedParts(dropped) {
+  if (!dropped || dropped.length === 0) return '';
+  var kinds = {};
+  for (var i = 0; i < dropped.length; i++) kinds[dropped[i]] = true;
+  return ' [Note: ' + dropped.length + ' non-text part(s) (' +
+    Object.keys(kinds).join(', ') + ') were sent with this message, but this ' +
+    'deployment does not support image or file input, so they were omitted and ' +
+    'their contents are unknown to you. Do not describe, guess or imply that ' +
+    'you can see them; say that the attachment could not be processed.]';
+}
+
 function messagesToPrompt(messages, tools) {
   // 存储各个消息段的数组
   var parts = [];
@@ -1475,16 +1528,10 @@ function messagesToPrompt(messages, tools) {
 
     // 如果内容是数组（多模态消息），提取文本部分
     // 例如: [{ type: "text", text: "Hello" }, { type: "image_url", ... }]
-    // 只提取 type 为 "text" 或 "input_text" 的部分
+    // 非文本部分无法处理，但会在提示词中显式说明，不再静默丢弃
     if (Array.isArray(content)) {
-      var textParts = [];
-      for (var ci = 0; ci < content.length; ci++) {
-        var c = content[ci];
-        if (c.type === 'text' || c.type === 'input_text') {
-          textParts.push(c.text || '');
-        }
-      }
-      content = textParts.join(' ');
+      var extracted = extractTextParts(content, ['text', 'input_text', 'output_text']);
+      content = extracted.text + describeDroppedParts(extracted.dropped);
     }
 
     // 根据角色进行不同的格式化
@@ -1629,11 +1676,19 @@ function googleContentsToPrompt(req) {
     var content = contents[ci];
     var role = content.role || 'user';
     var textParts = [];
+    var droppedParts = [];
     var partsArr = content.parts || [];
     for (var pi = 0; pi < partsArr.length; pi++) {
-      if (partsArr[pi].text) textParts.push(partsArr[pi].text);
+      var pp = partsArr[pi];
+      if (!pp || typeof pp !== 'object') continue;
+      if (pp.text) {
+        textParts.push(pp.text);
+      } else if (pp.inlineData || pp.inline_data ||
+                 pp.fileData || pp.file_data) {
+        droppedParts.push('inlineData');
+      }
     }
-    var text = textParts.join(' ');
+    var text = textParts.join(' ') + describeDroppedParts(droppedParts);
 
     // model 角色 → Assistant 前缀
     if (role === 'model') {
@@ -2332,12 +2387,12 @@ async function handleResponses(request, body, config) {
       // 其他格式的消息
       var content = item.content;
       if (Array.isArray(content)) {
-        var textParts = [];
-        for (var j = 0; j < content.length; j++) {
-          var c = content[j];
-          if (c.type === 'output_text') textParts.push(c.text || '');
-        }
-        content = textParts.join(' ');
+        // input_text 是 Responses API 用户输入的类型，output_text 是助手输出的
+        // 类型。此前只接受 output_text，于是用户发来的 input_text 被整段丢弃，
+        // 请求以 400 "empty input" 失败——文字并没有缺失，只是没被读取。
+        var extracted = extractTextParts(
+          content, ['input_text', 'output_text', 'text']);
+        content = extracted.text + describeDroppedParts(extracted.dropped);
       }
       messages.push({ role: item.role || 'user', content: content });
     }
@@ -2600,7 +2655,7 @@ export default {
       if (path === '/' || path === '/health') {
         return sendJSON({
           status: 'ok',
-          version: '1.6.1-cf-multifingerprint',
+          version: '1.6.2-cf-multifingerprint',
           platform: 'Cloudflare Workers',
           models: Object.keys(MODELS),
           defaultModel: config.defaultModel,

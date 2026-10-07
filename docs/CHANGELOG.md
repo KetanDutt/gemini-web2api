@@ -426,6 +426,30 @@ was reproduced.
   returning 501. A placeholder upstream URL reading
   `github.com/your-repo/gemini-web2api` was corrected.
 
+### Cloudflare Worker (1.6.2-cf-multifingerprint)
+
+- Image and file parts are no longer discarded silently. The Worker never
+  implemented Google's image-upload protocol, so non-text parts have to be
+  dropped — but it dropped them *without a word*. A client asking "what is in
+  this picture?" received a fluent, confident description of an image the model
+  never received. That is worse than an error: the response looks completely
+  normal, so nothing downstream can tell the answer was invented. All three
+  places that parse multimodal content independently (`messagesToPrompt` for
+  OpenAI chat, `handleResponses` for the Responses API, and
+  `googleContentsToPrompt` for the Google-native route) now append an explicit
+  note to the prompt stating how many non-text parts were dropped, that their
+  contents are unknown, and that the model must not describe or guess at them.
+  Requests still answer 200: a hard 400 was considered and rejected because it
+  would break clients that send an image alongside usable text and are content
+  to be answered from the text. The disclosure is guarded in both directions, so
+  it cannot quietly become an over-correction that annotates every request.
+- `/v1/responses` rejected requests that carried text. `handleResponses`
+  extracted only `output_text` — the *assistant* part type — so the Responses
+  API's own user-input type `input_text` was discarded wholesale and the request
+  failed with `400 empty input` even though the user's text was present. This
+  was a separate defect from the silent drop above and affected text-only
+  multimodal requests, which never involved an image at all.
+
 ### Cloudflare Worker (1.6.1-cf-multifingerprint)
 
 - `POST /v1/embeddings`, `/v1/audio/speech` and `/v1/images/generations` now
@@ -471,7 +495,7 @@ was reproduced.
 
 ### Tests
 
-- 18 tests → **520**, all offline. The Gemini wire protocol is faked at the frame
+- 18 tests → **527**, all offline. The Gemini wire protocol is faked at the frame
   level so real parsing and real HTTP handling are exercised without a network.
 - New modules for config layering, cookie formats, model resolution, protocol
   framing and streaming, prompt/tool parsing, every HTTP route, security
@@ -487,6 +511,16 @@ was reproduced.
   a CHANGELOG entry, and the test count both READMEs advertise matches the suite
   that actually runs. (That last guard caught its own author: adding tests
   invalidated the count in the same commit that added them.)
+- `WorkerImageHandlingTests` (7) drives the Worker under Node with multimodal
+  bodies and a `fetch` stub that *records the form-encoded upstream request*
+  before throwing, so the tests read the exact prompt Gemini would have received
+  without spending quota. They assert the disclosure appears on all three
+  protocol routes, that the dropped-part count is exact (two images report two,
+  not "some"), that `input_text` survives, and — the other direction — that
+  text-only requests and a `null` content part come out unannotated. Proven
+  non-vacuous by seven injections: reverting each of the three call sites,
+  suppressing the note, forcing the count to 1, appending the note
+  unconditionally, and restoring the deploy guide's "silently discarded" row.
 - `requires-python = ">=3.8"` is enforced by AST inspection rather than trust,
   since `compile()` under a newer interpreter accepts newer syntax and proves
   nothing. A first attempt scanned source text with a regex and false-positived

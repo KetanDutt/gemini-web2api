@@ -1079,6 +1079,148 @@ console.log('@@RESULT@@' + JSON.stringify(out));
 """
 
 
+def _run_worker_harness(worker_path, harness_source, marker="@@RESULT@@"):
+    """Execute the Worker under Node with upstream `fetch` stubbed out.
+
+    Returns ``(records_by_label, elapsed_seconds, tmpdir)``; the caller owns
+    ``tmpdir`` and must remove it.
+
+    Skips the whole class when Node or the Worker is unavailable. An absent
+    marker is an assertion failure rather than a skip: it means the Worker
+    threw during import, and reporting that as "no tests to run" would hide a
+    broken deploy behind a green build.
+    """
+    node = shutil.which("node")
+    if not node:
+        raise unittest.SkipTest("node is not installed")
+    if not os.path.exists(worker_path):
+        raise unittest.SkipTest("cloudflare/worker.js is not present")
+    tmp = tempfile.mkdtemp(prefix="worker-harness-")
+    try:
+        shutil.copyfile(worker_path, os.path.join(tmp, "worker.mjs"))
+        harness = os.path.join(tmp, "harness.mjs")
+        with open(harness, "w", encoding="utf-8") as handle:
+            handle.write(harness_source)
+        started = time.monotonic()
+        result = subprocess.run(
+            [node, harness], cwd=tmp,
+            capture_output=True, text=True, timeout=180,
+        )
+        elapsed = time.monotonic() - started
+        line = next((ln for ln in result.stdout.splitlines()
+                     if ln.startswith(marker)), None)
+        if line is None:
+            raise AssertionError(
+                f"the Worker harness produced no result (exit {result.returncode})\n"
+                f"stdout:\n{result.stdout[-2000:]}\n"
+                f"stderr:\n{result.stderr[-2000:]}")
+        records = {rec["label"]: rec for rec in json.loads(line[len(marker):])}
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    return records, elapsed, tmp
+
+# The same Worker, driven with multimodal bodies. Upstream `fetch` records the
+# form-encoded request it was handed and then throws, so these tests can read
+# the exact prompt Gemini would have received without spending any quota.
+_WORKER_IMAGE_HARNESS = r"""
+const attempts = [];
+globalThis.fetch = async (url, init) => {
+  let body = init && init.body ? String(init.body) : '';
+  // The upstream body is form-encoded; decode it so the prompt is readable.
+  try { body = decodeURIComponent(body.replace(/\+/g, ' ')); } catch (e) {}
+  attempts.push(body);
+  throw new Error('SENTINEL: upstream fetch attempted');
+};
+const mod = (await import('./worker.mjs')).default;
+const env = {
+  API_KEYS: '["sk-test"]',
+  COOKIE_STRING: '',
+  RETRY_ATTEMPTS: '1',
+  RETRY_DELAY_SEC: '0',
+  REQUEST_TIMEOUT_SEC: '30',
+  FINGERPRINT_JITTER_MS: '0',
+};
+const auth = { Authorization: 'Bearer sk-test',
+               'Content-Type': 'application/json' };
+const QUESTION = 'What is in this picture';
+const IMG = 'data:image/png;base64,AAAA';
+// A fragment of the note the Worker injects. Asserted as a fragment so the
+// wording can be improved without silently losing the guarantee.
+const NOTE = 'does not support image or file input';
+
+async function call(label, path, body) {
+  attempts.length = 0;
+  const req = new Request('https://worker.test' + path, {
+    method: 'POST', headers: auth, body: JSON.stringify(body),
+  });
+  const rec = { label: label, path: path, status: 0, code: null, threw: null,
+                message: null, upstream: 0, note: false, dropped: 0,
+                question: false };
+  try {
+    const res = await mod.fetch(req, env, { waitUntil: function () {} });
+    rec.status = res.status;
+    let text = '';
+    try { text = await res.text(); } catch (e) { text = ''; }
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed.error) {
+        rec.code = parsed.error.code || null;
+        rec.message = parsed.error.message || null;
+      }
+    } catch (e) {}
+  } catch (e) { rec.threw = String(e.message).slice(0, 120); }
+  const sent = attempts.join('\n');
+  rec.upstream = attempts.length;
+  rec.note = sent.indexOf(NOTE) !== -1;
+  rec.question = sent.indexOf(QUESTION) !== -1;
+  const counted = sent.match(/(\d+) non-text part/);
+  rec.dropped = counted ? Number(counted[1]) : 0;
+  return rec;
+}
+
+const imageUrl = { type: 'image_url', image_url: { url: IMG } };
+const out = [];
+out.push(await call('chat_text_and_image', '/v1/chat/completions', {
+  model: 'gemini-3.6-flash',
+  messages: [{ role: 'user', content: [
+    { type: 'text', text: QUESTION }, imageUrl] }] }));
+out.push(await call('chat_text_and_two_images', '/v1/chat/completions', {
+  model: 'gemini-3.6-flash',
+  messages: [{ role: 'user', content: [
+    { type: 'text', text: QUESTION }, imageUrl, imageUrl] }] }));
+out.push(await call('chat_image_only', '/v1/chat/completions', {
+  model: 'gemini-3.6-flash',
+  messages: [{ role: 'user', content: [imageUrl] }] }));
+out.push(await call('chat_unknown_part_type', '/v1/chat/completions', {
+  model: 'gemini-3.6-flash',
+  messages: [{ role: 'user', content: [
+    { type: 'text', text: QUESTION },
+    { type: 'input_audio', data: IMG }] }] }));
+out.push(await call('responses_input_text_and_image', '/v1/responses', {
+  model: 'gemini-3.6-flash',
+  input: [{ role: 'user', content: [
+    { type: 'input_text', text: QUESTION },
+    { type: 'input_image', image_url: IMG }] }] }));
+out.push(await call('google_inline_data',
+  '/v1beta/models/gemini-3.6-flash:generateContent', {
+  contents: [{ role: 'user', parts: [
+    { text: QUESTION },
+    { inlineData: { mimeType: 'image/png', data: 'AAAA' } }] }] }));
+out.push(await call('control_chat_string', '/v1/chat/completions', {
+  model: 'gemini-3.6-flash',
+  messages: [{ role: 'user', content: QUESTION }] }));
+out.push(await call('control_chat_text_array', '/v1/chat/completions', {
+  model: 'gemini-3.6-flash',
+  messages: [{ role: 'user', content: [{ type: 'text', text: QUESTION }] }] }));
+out.push(await call('control_null_part', '/v1/chat/completions', {
+  model: 'gemini-3.6-flash',
+  messages: [{ role: 'user', content: [
+    null, { type: 'text', text: QUESTION }] }] }));
+console.log('@@RESULT@@' + JSON.stringify(out));
+"""
+
+
 class WorkerRoutingTests(unittest.TestCase):
     """Run the Cloudflare Worker and assert how it routes.
 
@@ -1095,37 +1237,14 @@ class WorkerRoutingTests(unittest.TestCase):
     """
 
     WORKER = os.path.join(REPO_ROOT, "cloudflare", "worker.js")
-    MARKER = "@@RESULT@@"
     # Generous versus the ~2s a healthy run takes, and far below the 30s
     # REQUEST_TIMEOUT_SEC the harness configures.
     MAX_SECONDS = 15.0
 
     @classmethod
     def setUpClass(cls):
-        cls.node = shutil.which("node")
-        if not cls.node:
-            raise unittest.SkipTest("node is not installed")
-        if not os.path.exists(cls.WORKER):
-            raise unittest.SkipTest("cloudflare/worker.js is not present")
-        cls.tmp = tempfile.mkdtemp(prefix="worker-routing-")
-        shutil.copyfile(cls.WORKER, os.path.join(cls.tmp, "worker.mjs"))
-        harness = os.path.join(cls.tmp, "harness.mjs")
-        with open(harness, "w", encoding="utf-8") as handle:
-            handle.write(_WORKER_HARNESS)
-        started = time.monotonic()
-        result = subprocess.run(
-            [cls.node, harness], cwd=cls.tmp,
-            capture_output=True, text=True, timeout=180,
-        )
-        cls.elapsed = time.monotonic() - started
-        line = next((ln for ln in result.stdout.splitlines()
-                     if ln.startswith(cls.MARKER)), None)
-        if line is None:
-            raise AssertionError(
-                f"the Worker harness produced no result (exit {result.returncode})\n"
-                f"stdout:\n{result.stdout[-2000:]}\nstderr:\n{result.stderr[-2000:]}")
-        cls.results = {rec["label"]: rec
-                       for rec in json.loads(line[len(cls.MARKER):])}
+        cls.results, cls.elapsed, cls.tmp = _run_worker_harness(
+            cls.WORKER, _WORKER_HARNESS)
 
     @classmethod
     def tearDownClass(cls):
@@ -1312,6 +1431,204 @@ class WorkerRoutingTests(unittest.TestCase):
             f"the Worker held the event loop for {self.elapsed:.1f}s, which "
             "means a request-timeout timer is no longer cleared on the failure "
             "path")
+
+
+class WorkerImageHandlingTests(unittest.TestCase):
+    """The Worker cannot see images, so it must say so rather than pretend.
+
+    `cloudflare/worker.js` never implemented Google's image-upload protocol, so
+    every non-text part has to be dropped. Until 1.6.2 that drop was *silent*:
+    a client asking "what is in this picture?" got a fluent, confident
+    description of an image the model never received. That is worse than an
+    error, because the response looks completely normal and nothing downstream
+    can tell the answer was invented. The fix keeps answering from the text —
+    a hard 400 would break working clients — but writes the omission into the
+    prompt so the model knows something is missing and says so.
+
+    A second, separate defect lived in `handleResponses`: it accepted only
+    `output_text`, the *assistant* part type, so the Responses API's own
+    user-input type `input_text` was discarded wholesale and the request failed
+    with `400 empty input` even though text had been sent.
+
+    Upstream `fetch` is stubbed to record the form-encoded body it was handed
+    and then throw, so these tests read the exact prompt Gemini would have
+    received without spending any quota.
+    """
+
+    WORKER = os.path.join(REPO_ROOT, "cloudflare", "worker.js")
+
+    # label -> (note expected, dropped parts expected, question expected).
+    # `chat_image_only` sends no text at all, so the question cannot survive.
+    IMAGE_CASES = {
+        "chat_text_and_image": (True, 1, True),
+        "chat_text_and_two_images": (True, 2, True),
+        "chat_image_only": (True, 1, False),
+        "chat_unknown_part_type": (True, 1, True),
+        "responses_input_text_and_image": (True, 1, True),
+        "google_inline_data": (True, 1, True),
+    }
+    # Requests with nothing to drop must come out untouched. These are what
+    # keep the disclosure from becoming an over-correction that annotates
+    # every request the Worker handles.
+    CONTROL_CASES = {
+        "control_chat_string": True,
+        "control_chat_text_array": True,
+        "control_null_part": True,
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        cls.results, cls.elapsed, cls.tmp = _run_worker_harness(
+            cls.WORKER, _WORKER_IMAGE_HARNESS)
+        cls.addClassCleanup(shutil.rmtree, cls.tmp, True)
+
+    def _rec(self, label):
+        self.assertIn(label, self.results, f"harness did not exercise {label}")
+        rec = self.results[label]
+        self.assertIsNone(
+            rec["threw"],
+            f"{rec['path']} escaped the handler: {rec['threw']}")
+        return rec
+
+    def test_every_dropped_part_is_disclosed_in_the_prompt(self):
+        """The regression this class exists for, on all three entry points.
+
+        Each protocol family — OpenAI chat, the Responses API, and the
+        Google-native `generateContent` — parses multimodal content in its own
+        place, so all three had to be fixed independently. Asserting one would
+        have left two silently discarding.
+        """
+        for label, (note, dropped, question) in self.IMAGE_CASES.items():
+            with self.subTest(case=label):
+                rec = self._rec(label)
+                self.assertEqual(
+                    rec["note"], note,
+                    f"{rec['path']} dropped a non-text part without telling the "
+                    "model, so it can still describe an image it never received")
+                self.assertEqual(
+                    rec["dropped"], dropped,
+                    f"{label} reported {rec['dropped']} dropped part(s), "
+                    f"expected {dropped}")
+                self.assertEqual(
+                    rec["question"], question,
+                    f"{label} did not forward the user's own text correctly")
+
+    def test_the_count_is_exact_so_two_images_are_not_reported_as_one(self):
+        """A note that says "some parts were dropped" is much weaker.
+
+        The number is what lets a model say "I could not process the two
+        attachments" instead of hedging vaguely, and it is the part most likely
+        to be lost if the extraction loop is rewritten.
+        """
+        one = self._rec("chat_text_and_image")["dropped"]
+        two = self._rec("chat_text_and_two_images")["dropped"]
+        self.assertEqual((one, two), (1, 2),
+                         "the disclosure must count parts, not just notice them")
+
+    def test_the_responses_api_reads_its_own_user_input_type(self):
+        """`input_text` is user input; only reading `output_text` lost it.
+
+        This was not a silent drop but a hard failure: the text was present in
+        the request, the Worker simply never looked at that part type, so the
+        prompt came out empty and the call was rejected before reaching Gemini.
+        """
+        rec = self._rec("responses_input_text_and_image")
+        self.assertNotEqual(
+            rec["status"], 400,
+            f"a Responses request carrying input_text was rejected: {rec['message']}")
+        self.assertNotEqual(rec["message"], "empty input")
+        self.assertEqual(
+            rec["upstream"], 1,
+            "the request must be forwarded, not rejected as empty")
+        self.assertTrue(rec["question"],
+                        "the user's input_text never reached the prompt")
+
+    def test_text_only_requests_are_left_untouched(self):
+        """The disclosure must not leak into requests that dropped nothing.
+
+        Without this the fix could be "implemented" by appending the note
+        unconditionally, which would corrupt every ordinary prompt and still
+        pass the tests above.
+        """
+        for label, question in self.CONTROL_CASES.items():
+            with self.subTest(case=label):
+                rec = self._rec(label)
+                self.assertFalse(
+                    rec["note"],
+                    f"{label} dropped nothing but was still annotated")
+                self.assertEqual(rec["dropped"], 0)
+                self.assertEqual(rec["question"], question,
+                                 f"{label} did not forward the user's text")
+
+    def test_a_null_part_is_skipped_without_inventing_an_attachment(self):
+        """Clients do send nulls in content arrays; that is not an attachment.
+
+        Counting a null as a dropped part would tell the model something was
+        withheld when nothing was, which is the same class of falsehood the fix
+        exists to remove — only pointed the other way.
+        """
+        rec = self._rec("control_null_part")
+        self.assertFalse(rec["note"])
+        self.assertEqual(rec["dropped"], 0)
+        self.assertTrue(rec["question"], "a null part must not swallow the text")
+
+    def test_disclosing_keeps_the_request_working(self):
+        """The chosen behaviour is a warning, not a rejection.
+
+        Every image case must still be forwarded upstream rather than refused.
+        A hard 400 would be a defensible design, but it would break clients
+        that send an image alongside usable text and are happy to be answered
+        from the text — so the non-breaking choice is asserted, not assumed.
+
+        The expected status is 502, not 200: the stubbed upstream always
+        throws. What matters is that the failure is *upstream's*, i.e. a 5xx,
+        and not the Worker refusing the request with a 4xx because it carried
+        an image.
+        """
+        for label in self.IMAGE_CASES:
+            with self.subTest(case=label):
+                rec = self._rec(label)
+                self.assertGreaterEqual(
+                    rec["upstream"], 1,
+                    f"{label} was rejected instead of answered from its text")
+                self.assertFalse(
+                    400 <= rec["status"] < 500,
+                    f"{label} answered {rec['status']} ({rec['message']}); "
+                    "disclosing a dropped part must not turn a working request "
+                    "into a client error")
+                self.assertEqual(
+                    rec["status"], 502,
+                    "the stubbed upstream failure should surface as 502, so any "
+                    "other status means the Worker answered before trying")
+
+    def test_the_divergence_table_describes_a_warning_not_a_silent_drop(self):
+        """The deploy guide told readers images vanish without a word.
+
+        `cloudflare/README.MD` is what someone reads to choose between the
+        Worker and the Python package. Its table said the Worker discards
+        images silently, which is now false in the direction that matters: a
+        reader who needs the model to admit it cannot see an attachment would
+        rule the Worker out.
+        """
+        doc = os.path.join(REPO_ROOT, "cloudflare", "README.MD")
+        if not os.path.exists(doc):
+            self.skipTest("cloudflare/README.MD is not present")
+        with open(doc, encoding="utf-8") as handle:
+            text = handle.read()
+        rows = [ln for ln in text.splitlines()
+                if ln.startswith("|") and "图片输入" in ln]
+        self.assertEqual(
+            len(rows), 1,
+            f"expected one divergence-table row for image input, found {len(rows)}")
+        self.assertNotIn(
+            "静默丢弃", rows[0],
+            "the Worker no longer drops image parts silently; the divergence "
+            "table still says it does")
+        self.assertIn("提示词", rows[0],
+                      "the table must say the model is told about the drop")
+        self.assertNotIn("图片会被静默丢弃", text,
+                         "the prose still describes the pre-1.6.2 behaviour")
+
 
 
 class WindowsLauncherTests(unittest.TestCase):

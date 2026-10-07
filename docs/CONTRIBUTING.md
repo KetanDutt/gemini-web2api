@@ -166,7 +166,8 @@ explicitly.
 **The Worker is a separate implementation.** `cloudflare/worker.js` is not
 generated from the Python code and the two diverge in *both* directions: the
 Worker adds multi-cookie and fingerprint rotation, while lacking image input
-(silently discarded), `/v1/completions`, and the `/ready` and `/status` probes.
+(dropped parts are disclosed to the model rather than silently ignored),
+`/v1/completions`, and the `/ready` and `/status` probes.
 `cloudflare/README.MD`'s model table tracks the Worker, not Python — do not
 "fix" it to match. Known gaps are declared in `WorkerParityTests.KNOWN_GAPS`;
 read [its divergence table](../cloudflare/README.MD) before touching either side.

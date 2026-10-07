@@ -64,7 +64,7 @@ https://你的worker.workers.dev/health
 ```json
 {
   "status": "ok",
-  "version": "1.6.1-cf-multifingerprint",
+  "version": "1.6.2-cf-multifingerprint",
   "platform": "Cloudflare Workers",
   "models": [
     "gemini-3.7-flash",
@@ -316,18 +316,18 @@ Worker 当前支持 **8 个模型**，Python 版本支持 **9 个**。
 | Google 原生 `/v1beta`（Gemini CLI） | ✅ | ✅ |
 | `/health` 健康检查 | ✅ | ✅ |
 | `/ready` `/status` 探针与指标 | ❌ | ✅ |
-| 图片输入（多模态） | ❌ **静默丢弃** | ✅ |
+| 图片输入（多模态） | ⚠️ **不支持**（被丢弃的部分会在提示词中告知模型） | ✅ |
 | 构建标签（`bl`）自动刷新 | ✅ | ✅ |
 | 速率限制 | ✅ | ✅ |
 | SSRF 防护 / 请求体大小上限 | ❌ 不适用（不抓取图片） | ✅ |
 | Web 控制台 | ❌ | ✅ |
 | 环境变量配置 | ✅ Worker 变量 | ✅ `GEMINI_WEB2API_*` |
 
-> 两者的版本号是独立序列：Worker 为 `1.6.1-cf-multifingerprint`，Python 包为 `1.2.0`。版本号接近纯属巧合，不代表功能对应。
+> 两者的版本号是独立序列：Worker 为 `1.6.2-cf-multifingerprint`，Python 包为 `1.2.0`。版本号接近纯属巧合，不代表功能对应。
 
 ### 需要特别注意的行为差异
 
-**图片会被静默丢弃。** Worker 解析多模态消息数组时只提取 `type` 为 `text` / `input_text` 的部分，`image_url` 与 `inlineData` 被直接忽略且**不报错**。客户端会以为图片已被理解，实际只发送了文字。Python 版本会真正下载并上传图片，或在无法处理时返回 400。
+**图片无法被处理，但不再被静默丢弃。** Worker 没有实现 Google 的图片上传协议，因此解析多模态消息时只提取文本部分，`image_url`、`input_image` 与 `inlineData` 无法被理解。1.6.2 之前这些部分被直接忽略且**不报错**：客户端以为图片已被理解，模型则会对着一张它从未收到的图片自信作答——这比报错更糟，因为响应看起来完全正常。现在 Worker 会在提示词中写入一条明确说明：有 N 个非文本部分被丢弃、其内容对模型未知、不要描述或推测它们，而应说明附件无法处理。请求仍然返回 200，因此不会破坏既有客户端。需要真正理解图片时请使用 Python 版本，它会下载并上传图片，或在无法处理时返回 400。
 
 **其余未匹配的 `POST /v1/*` 仍会被兜底转为 chat。** 这是有意为之的宽容行为，用于兼容各客户端的路径差异。
 
@@ -359,6 +359,7 @@ Python 版本的完整文档见仓库根目录的 [`docs/`](../docs/README.md)�
 
 | 版本 | 日期 | 更新内容 |
 |------|------|---------|
+| 1.6.2 | 2026-10-07 | 图片/文件部分不再静默丢弃：Worker 在提示词中明确告知模型有附件被丢弃，避免它描述从未收到的图片；同时修复 `/v1/responses` 只读取 `output_text` 导致 `input_text` 被整段丢弃、请求以 `400 empty input` 失败的问题 |
 | 1.6.1 | 2026-10-07 | `/v1/embeddings`、`/v1/audio/speech`、`/v1/images/generations` 明确返回 501，不再兜底转为 chat 并消耗真实调用；修复 `geminiStreamGenerate` 上游失败时定时器未清除的泄漏 |
 | 1.6.0 | 2026-10-07 | 新增 `gemini-3.7-flash`；补充与 Python 版本的差异对照表 |
 | 1.5.0 | 2026-07-31 | 新增多指纹轮换、多Cookie轮换、随机延迟机制 |
