@@ -84,6 +84,23 @@ jobs:
       - name: Build sdist and wheel
         run: python -m build
 
+      # A working tree and a `git archive` checkout both carry every tracked
+      # file, so neither can reveal what MANIFEST.in decided to ship - only an
+      # extracted sdist can. This is the check that caught a manifest omitting
+      # the Dockerfile, the shim and the logo its own docs told readers to use.
+      - name: Run the suite from the extracted sdist
+        run: |
+          python -m pip install --quiet httpx
+          rm -rf /tmp/sdist && mkdir -p /tmp/sdist
+          tar -xzf dist/*.tar.gz -C /tmp/sdist
+          cd /tmp/sdist/*/
+          rc=0
+          python -m unittest discover -s tests -t . > /tmp/sd.txt 2>&1 || rc=$?
+          cat /tmp/sd.txt
+          summary=$(grep -E '^(OK|FAILED)' /tmp/sd.txt | tail -1)
+          echo "::notice title=sdist-suite::exit=${rc} ${summary:-no summary line} (baseline: 508 tests, 12 skipped)"
+          exit ${rc}
+
       - name: Install the wheel into a clean venv
         run: |
           python -m venv /tmp/wheelenv

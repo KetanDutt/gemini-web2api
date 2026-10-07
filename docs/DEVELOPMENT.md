@@ -209,6 +209,12 @@ python -m build --sdist && mkdir -p /tmp/sdx \
   && python -m unittest discover -s tests -t .
 ```
 
+CI does this too: the `package` job runs the suite from the extracted sdist and
+emits an `sdist-suite` annotation with the exit status and summary, so a
+manifest regression fails the build instead of shipping. Locally the same run
+reports 23 skips rather than 12 unless `httpx` is installed, because the
+incremental-streaming tests gate on it — CI installs it first.
+
 Expect **508 tests and 12 skips** from an extracted sdist: 5 git-dependent and
 7 repository-metadata. Anything else means either a file stopped shipping or a
 guard started skipping for a new reason. `test_the_sdist_ships_every_file_the_docs_promise`
@@ -358,7 +364,7 @@ Then:
 |---|---|
 | `test` | full suite on Python 3.8, 3.11, 3.12, 3.13 |
 | `test-without-httpx` | suite with no third-party packages installed |
-| `package` | `python -m build`, install the wheel, run the console script and the shim |
+| `package` | `python -m build`, **run the suite from the extracted sdist**, install the wheel, run the console script and the shim |
 | `lint` | `ruff check` + `compileall` |
 | `docker` | build the image (no push) with layer caching |
 

@@ -496,6 +496,11 @@ was reproduced.
   the parser itself, because a parser that finds nothing makes the other four
   pass vacuously. All five were verified to fail on an injected violation, and a
   sixth check confirms a genuine `set -o pipefail` does *not* trip them.
+- The `package` CI job now runs the suite **from the extracted sdist** and emits
+  an `sdist-suite` annotation, so a `MANIFEST.in` regression fails the build
+  rather than shipping. This was the check whose absence let the defect below
+  survive: building an sdist and then ignoring it proves only that the build did
+  not crash.
 - `test_the_sdist_ships_every_file_the_docs_promise` closes the class of defect
   rather than the instance: it scans the shipped Markdown for root-level
   filenames and requires every one that actually exists to be named by a
