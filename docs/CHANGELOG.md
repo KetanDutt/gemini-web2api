@@ -96,6 +96,19 @@ was reproduced.
 - `HEAD` and `OPTIONS` responses bypassed `send_json`, so they were never counted
   in `requests_served` or `status_codes` at all.
 
+- `start.bat` was committed with LF-only line endings and no `.gitattributes`.
+  `cmd.exe` locates `goto` labels by scanning for CR-terminated lines, so a
+  LF-only batch file can fail to find a label or mis-parse a parenthesised block
+  — and the launcher depends on `goto :fail`, a `:scanargs` loop and several
+  `if ... ( ... )` blocks. `.gitattributes` now pins `*.bat -text`, storing the
+  CRLF bytes verbatim. `-text` rather than `text eol=crlf` deliberately: the
+  latter normalises the blob to LF and converts only at checkout, so a GitHub
+  "Download ZIP", `git archive` or raw-file fetch would still hand out LF-only
+  bytes to exactly the users least equipped to debug the result.
+
+- The lint job checked `gemini_web2api tests` but not `scripts/`, so the Python
+  the Windows launcher depends on was never linted or compile-checked in CI.
+
 - A stream that failed mid-flight never incremented `upstream_failures`. The
   non-streaming path routes through `_upstream_failure()`, which counts it; the
   streaming path caught the exception, emitted an SSE error event and moved on.
@@ -337,7 +350,7 @@ was reproduced.
 
 ### Tests
 
-- 18 tests → **478**, all offline. The Gemini wire protocol is faked at the frame
+- 18 tests → **482**, all offline. The Gemini wire protocol is faked at the frame
   level so real parsing and real HTTP handling are exercised without a network.
 - New modules for config layering, cookie formats, model resolution, protocol
   framing and streaming, prompt/tool parsing, every HTTP route, security

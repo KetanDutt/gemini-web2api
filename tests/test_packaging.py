@@ -689,6 +689,62 @@ class WindowsLauncherTests(unittest.TestCase):
             cwd=REPO_ROOT, capture_output=True)
         self.assertEqual(result.returncode, 1, "start.bat is ignored by git")
 
+    def test_launcher_uses_crlf_line_endings(self):
+        """cmd.exe locates `goto` labels by scanning for CR-terminated lines.
+
+        A LF-only batch file can fail to find a label or mis-parse a
+        parenthesised block, and this launcher depends on `goto :fail`, a
+        `:scanargs` loop and several `if ... ( ... )` blocks. The bytes are
+        checked rather than git's view of them, because what reaches the user's
+        disk is what actually runs.
+        """
+        with open(self.bat_path, "rb") as handle:
+            raw = handle.read()
+        crlf = raw.count(b"\r\n")
+        bare_lf = raw.count(b"\n") - crlf
+        self.assertEqual(bare_lf, 0,
+                         f"start.bat has {bare_lf} LF-only line(s); cmd.exe needs CRLF")
+        self.assertGreater(crlf, 100, "start.bat looks truncated")
+
+    def test_gitattributes_stores_the_launcher_as_crlf(self):
+        """`text eol=crlf` only converts at checkout, so a GitHub ZIP download
+        or `git archive` would still hand out LF-only bytes. `-text` stores the
+        CRLF verbatim, making every retrieval path safe."""
+        attrs_path = os.path.join(REPO_ROOT, ".gitattributes")
+        self.assertTrue(os.path.exists(attrs_path), ".gitattributes is missing")
+        with open(attrs_path, encoding="utf-8") as handle:
+            lines = [line.strip() for line in handle
+                     if line.strip() and not line.startswith("#")]
+        # Last matching pattern wins in .gitattributes, so the generic rule must
+        # precede the override or it silently undoes it.
+        order = {pat.split()[0]: i for i, pat in enumerate(lines) if pat.split()}
+        self.assertIn("*", order)
+        self.assertIn("*.bat", order)
+        self.assertLess(order["*"], order["*.bat"],
+                        "`* text=auto` must come before `*.bat -text` or it overrides it")
+        bat_rule = next(line for line in lines if line.startswith("*.bat"))
+        self.assertIn("-text", bat_rule,
+                      f"*.bat must disable conversion, got: {bat_rule}")
+
+    def test_git_stores_the_launcher_blob_as_crlf(self):
+        """Guards the retrieval paths that bypass a working-tree checkout."""
+        result = subprocess.run(["git", "ls-files", "--eol", "start.bat"],
+                                cwd=REPO_ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("i/crlf", result.stdout,
+                      f"the committed blob is not CRLF: {result.stdout.strip()}")
+
+    def test_ci_lints_every_python_directory(self):
+        """scripts/ holds real Python; a lint job that skips it lets rot in."""
+        ci = os.path.join(REPO_ROOT, ".github", "workflows", "ci.yml")
+        with open(ci, encoding="utf-8") as handle:
+            text = handle.read()
+        for directory in ("gemini_web2api", "tests", "scripts"):
+            self.assertRegex(text, rf"ruff check[^\n]*\b{directory}\b",
+                             f"CI does not lint {directory}/")
+            self.assertRegex(text, rf"compileall[^\n]*\b{directory}\b",
+                             f"CI does not compile-check {directory}/")
+
     def test_venv_is_ignored(self):
         """The launcher creates .venv; it must never be committed."""
         result = subprocess.run(["git", "check-ignore", "-q", ".venv/"],

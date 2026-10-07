@@ -1,0 +1,29 @@
+# Line endings.
+#
+# Order matters: in .gitattributes the LAST matching pattern wins, so the
+# generic normalisation rule comes first and the specific overrides follow.
+
+# Everything is normalised to LF in the repository and checked out with the
+# platform's native ending.
+*      text=auto
+
+# Binary assets must never be touched by line-ending conversion.
+*.png  binary
+*.ico  binary
+*.jpg  binary
+*.gif  binary
+
+# start.bat is executed by cmd.exe, whose parser is byte-oriented: labels and
+# `goto` targets are located by scanning for CR-terminated lines, and a
+# LF-only batch file can fail to find a label or mis-parse a parenthesised
+# block. The launcher relies on `goto :fail`, a `:scanargs` loop and several
+# `if ... ( ... )` blocks, so CRLF is a correctness requirement, not cosmetics.
+#
+# `-text` rather than `text eol=crlf`: the latter normalises the blob to LF in
+# the index and only converts on `git checkout`, so a GitHub "Download ZIP",
+# `git archive`, or a raw-file fetch would still hand out LF-only bytes and
+# reintroduce the problem for exactly the users least equipped to debug it.
+# Disabling conversion stores the CRLF bytes verbatim, so every retrieval path
+# produces a working file.
+*.bat  -text
+*.cmd  -text

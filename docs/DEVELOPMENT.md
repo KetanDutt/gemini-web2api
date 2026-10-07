@@ -140,6 +140,30 @@ touching these areas, keep the tests green:
   Linux CI runner, so these are content guards. Each was verified to fail by
   injecting the violation it forbids.
 
+### Editing `start.bat`
+
+**Keep CRLF line endings.** `cmd.exe` locates `goto` labels by scanning for
+CR-terminated lines, so a LF-only batch file can fail to find a label or
+mis-parse a parenthesised block. The launcher uses `goto :fail`, a `:scanargs`
+loop and several `if ... ( ... )` blocks, so this is a correctness requirement.
+
+`.gitattributes` pins `*.bat -text`, which stores the CRLF bytes verbatim rather
+than normalising to LF and converting at checkout. Do not "fix" that to
+`text eol=crlf`: a GitHub ZIP download, `git archive` or raw-file fetch bypasses
+checkout conversion and would hand out LF-only bytes.
+
+If your editor converts the file anyway, `test_launcher_uses_crlf_line_endings`
+and `test_git_stores_the_launcher_blob_as_crlf` will fail. Restore with:
+
+```bash
+git add --renormalize start.bat
+```
+
+Anything reading or writing JSON belongs in `scripts/win_setup.py`, not in the
+batch file — batch quoting cannot express it reliably, and Python can be tested.
+That helper prints `PORT=<n>` / `CREATED=<0|1>` on stdout for the batch file to
+parse, so keep human-readable messages on stderr (`say()`).
+
 ## Linting
 
 ```bash
