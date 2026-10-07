@@ -337,6 +337,25 @@ The `package` job is a regression guard, not a formality: flat-layout
 auto-discovery used to fail outright because the root holds both `cloudflare/`
 and `gemini_web2api/`, so the project could not be built at all.
 
+### Expected skips
+
+The `test` job prints a `test-suite` **annotation** carrying `exit=`, `skipped=`
+and `node=`. It exists because a green checkmark is not evidence on its own: a
+guard that silently skips is indistinguishable from one that ran, and job logs
+are not always reachable when you need to check. `CIWorkflowTests` fails if that
+audit is removed.
+
+The baseline is **`skipped=0`** on Python 3.11+ and **`skipped=7`** on 3.8 — the
+seven `PyprojectTests`/`VersionConsistencyTests` cases that read
+`pyproject.toml` with `tomllib`, which is 3.11+. Those are benign: the file they
+check is the same on every leg, and the 3.11–3.13 jobs do run them. Anything
+*other* than those seven on the 3.8 leg, or any skip at all elsewhere, means a
+guard has stopped guarding — most likely because `node` went missing, which the
+annotation reports alongside.
+
+The `test-without-httpx` job legitimately skips more (every incremental-streaming
+test needs `httpx`), which is the point of that job rather than a gap in it.
+
 ## Design notes worth knowing
 
 **Why the standard library HTTP server?** Zero required dependencies is the

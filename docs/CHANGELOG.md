@@ -435,6 +435,19 @@ was reproduced.
   nothing. A first attempt scanned source text with a regex and false-positived
   on a `|` inside a regex *string literal* in `gemini.py`; only nodes in
   annotation position are inspected now.
+- Post-3.8 *syntax* is caught by `ast.parse(..., feature_version=(3, 8))` across
+  the package, `scripts/` and `tests/`, which applies 3.8 grammar on whatever
+  interpreter is running. This replaces an `ast.Match` walk that had to skip
+  when `ast.Match` did not exist — so the guard was absent on 3.8 and 3.9, the
+  two interpreters it existed to protect, and CI's py3.8 leg quietly ran one
+  test fewer than it appeared to. The replacement is also broader: it rejects
+  `except*` (3.11) and parenthesised `with` (3.9/3.10) as well as `match`, and
+  on 3.8 it proves the real thing rather than a proxy — that the modules parse.
+  PEP 585/604 annotations and `dict |=` stay on AST walks, because those are
+  valid 3.8 grammar and fail at runtime instead of at parse time. Verified with
+  four injected violations (a `match` in the package, an `except*` in `tests/`,
+  a parenthesised `with` in `scripts/`, and a broken scan directory to confirm
+  the guard cannot pass by finding nothing).
 - Worker/Python model parity is checked by parsing `cloudflare/worker.js`:
   phantom models, `(mode, think)` disagreements, and undocumented gaps all fail,
   and `node --check` guards the Worker's syntax (skipped when Node is absent).

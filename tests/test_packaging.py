@@ -731,16 +731,41 @@ class Python38CompatibilityTests(unittest.TestCase):
                         offenders.append(f"{name}:{node.lineno}")
         self.assertEqual(offenders, [], f"PEP 604 unions need Python 3.10+: {offenders}")
 
-    def test_no_match_statements(self):
-        """`match`/`case` needs 3.10+. `match = re.search(...)` is just a name."""
-        if not hasattr(ast, "Match"):
-            self.skipTest("this interpreter cannot parse match statements")
+    def test_every_module_parses_under_python_38_grammar(self):
+        """Post-3.8 *syntax* is rejected by the parser itself, on any version.
+
+        `ast.parse(..., feature_version=(3, 8))` applies 3.8 grammar whatever
+        the host interpreter, so this catches `match`/`case` (3.10), `except*`
+        (3.11) and parenthesised `with` (3.9/3.10) in one assertion. It
+        replaces an `ast.Match` walk that had to skip when `ast.Match` did not
+        exist - which meant the guard was absent on 3.8 and 3.9, the very
+        interpreters it existed to protect. On 3.8 it now proves the real
+        thing: the modules parse.
+
+        PEP 585/604 annotations and `dict |=` are deliberately *not* covered
+        here. They are valid 3.8 grammar and fail at runtime instead, which is
+        what the AST-walk tests alongside this one are for.
+        """
         offenders = []
-        for name, tree in self._trees().items():
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Match):
-                    offenders.append(f"{name}:{node.lineno}")
-        self.assertEqual(offenders, [], f"match statements need Python 3.10+: {offenders}")
+        targets = [os.path.join(REPO_ROOT, "gemini_web2api.py")]
+        for directory in ("gemini_web2api", "scripts", "tests"):
+            for dirpath, subdirs, files in os.walk(os.path.join(REPO_ROOT, directory)):
+                subdirs[:] = [d for d in subdirs if d != "__pycache__"]
+                for name in sorted(files):
+                    if name.endswith(".py"):
+                        targets.append(os.path.join(dirpath, name))
+        self.assertGreater(len(targets), 20, "the scan found almost nothing")
+        for path in targets:
+            with open(path, encoding="utf-8") as handle:
+                source = handle.read()
+            try:
+                ast.parse(source, filename=path, feature_version=(3, 8))
+            except SyntaxError as exc:
+                offenders.append(f"{os.path.relpath(path, REPO_ROOT)}:{exc.lineno}: {exc.msg}")
+        self.assertEqual(
+            offenders, [],
+            f"this is syntax newer than Python 3.8, which requires-python "
+            f"claims to support: {offenders}")
 
     def test_no_dict_merge_operator(self):
         """`{} | {}` needs 3.9+. Only literal dicts are flagged, so a bitwise
