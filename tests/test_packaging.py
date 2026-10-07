@@ -345,6 +345,119 @@ class DocumentationConsistencyTests(unittest.TestCase):
             )
 
 
+def _slugify(heading):
+    """GitHub's heading -> anchor rules, as implemented by github-slugger.
+
+    Lowercase, drop inline markup markers, drop anything that is not a word
+    character, space or hyphen, then replace *each* space with one hyphen.
+    Collapsing space runs instead would be wrong: an em dash between two words
+    is removed and leaves two adjacent spaces, which GitHub turns into a double
+    hyphen. Getting this wrong produces false failures on real anchors.
+    """
+    text = heading.strip().lower()
+    text = re.sub(r"[`*_]", "", text)
+    text = re.sub(r"[^\w\s-]", "", text, flags=re.UNICODE)
+    return text.replace(" ", "-")
+
+
+def _anchors_in(path):
+    """Every anchor a Markdown file exposes, including -1/-2 duplicates."""
+    with open(path, encoding="utf-8") as handle:
+        body = handle.read()
+    counts = {}
+    for heading in re.findall(r"^#{1,6}\s+(.*)$", body, re.MULTILINE):
+        slug = _slugify(heading)
+        counts[slug] = counts.get(slug, 0) + 1
+    anchors = set()
+    for slug, seen in counts.items():
+        anchors.add(slug)
+        for i in range(1, seen):
+            anchors.add(f"{slug}-{i}")
+    return anchors
+
+
+class MarkdownLinkTests(unittest.TestCase):
+    """Every relative link and heading anchor in the corpus must resolve.
+
+    Docs that exist but point nowhere were part of the original defect class
+    this release fixed. Reachability of *pages* is asserted elsewhere; this
+    covers link targets and in-page anchors, which is where drift hides: a
+    heading gets reworded and every link to it silently dies.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.files = []
+        roots = ["docs", "README.md", "README_CN.md", "cloudflare",
+                 "gemini-cookie-sync-extension"]
+        for root in roots:
+            full = os.path.join(REPO_ROOT, root)
+            if os.path.isfile(full):
+                cls.files.append(full)
+                continue
+            for dirpath, dirnames, filenames in os.walk(full):
+                dirnames[:] = [d for d in dirnames
+                               if d not in (".git", ".venv", "__pycache__", "node_modules")]
+                cls.files += [os.path.join(dirpath, f) for f in sorted(filenames)
+                              if f.lower().endswith(".md")]
+        cls.files.sort()
+        cls._anchors = {}
+
+    def test_corpus_was_found(self):
+        self.assertGreater(len(self.files), 10, "the link scan found no markdown")
+
+    def test_relative_links_resolve(self):
+        broken = []
+        for path in self.files:
+            with open(path, encoding="utf-8") as handle:
+                text = handle.read()
+            for target in re.findall(r"\[[^\]]+\]\(([^)]+)\)", text):
+                if target.startswith(("http://", "https://", "mailto:")):
+                    continue
+                location = target.partition("#")[0]
+                if not location:
+                    continue
+                resolved = os.path.normpath(
+                    os.path.join(os.path.dirname(path), location))
+                if not os.path.exists(resolved):
+                    broken.append(f"{os.path.relpath(path, REPO_ROOT)} -> {target}")
+        self.assertEqual(broken, [], f"broken relative links: {broken}")
+
+    def test_heading_anchors_resolve(self):
+        """An anchor is only valid if the target file really has that heading."""
+        broken = []
+        for path in self.files:
+            with open(path, encoding="utf-8") as handle:
+                text = handle.read()
+            for target in re.findall(r"\[[^\]]+\]\(([^)]+)\)", text):
+                if target.startswith(("http://", "https://", "mailto:")):
+                    continue
+                location, _, fragment = target.partition("#")
+                if not fragment:
+                    continue
+                resolved = os.path.normpath(
+                    os.path.join(os.path.dirname(path), location)) if location else path
+                if not os.path.exists(resolved):
+                    continue  # reported by test_relative_links_resolve
+                if resolved not in self._anchors:
+                    self._anchors[resolved] = _anchors_in(resolved)
+                if fragment.lower() not in self._anchors[resolved]:
+                    broken.append(f"{os.path.relpath(path, REPO_ROOT)} -> {target}")
+        self.assertEqual(broken, [], f"broken heading anchors: {broken}")
+
+    def test_slugifier_handles_an_em_dash_between_words(self):
+        """Guards the guard: a space-collapsing slugifier would pass this test
+        suite while reporting false breakages on real anchors."""
+        self.assertEqual(
+            _slugify("1.2 Two divergent implementations — `CRITICAL`"),
+            "12-two-divergent-implementations--critical")
+
+    def test_slugifier_strips_punctuation_and_inline_code(self):
+        self.assertEqual(_slugify("Editing `start.bat`"), "editing-startbat")
+        self.assertEqual(_slugify("Outbound: authenticating to Google"),
+                         "outbound-authenticating-to-google")
+
+
 class Python38CompatibilityTests(unittest.TestCase):
     """`requires-python = ">=3.8"` must be true, not aspirational.
 

@@ -469,5 +469,5 @@ bare base64 in `data`/`base64` fields. Google-native requests accept
 
 The MIME type is sniffed from the bytes, not taken from the client's claim.
 Remote URLs are refused when they resolve to loopback, link-local, private or
-reserved addresses — see [SECURITY.md](SECURITY.md#ssrf). Anonymous uploads
+reserved addresses — see [SECURITY.md](SECURITY.md#ssrf-protection-on-image-fetching). Anonymous uploads
 sometimes fail; configure a cookie if they do.

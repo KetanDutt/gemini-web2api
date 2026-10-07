@@ -373,6 +373,7 @@ history entry, so a browser request can be traced to its log line.
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model and what is protected by default |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Symptom → cause → fix |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Layout, tests, adding a model, release checklist |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | How to contribute, what CI enforces, project invariants |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | Version history |
 | [docs/AUDIT.md](docs/AUDIT.md) | The 1.2.0 defect audit, with reproductions |
 
@@ -421,7 +422,7 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api tests
 ```
 
-484 tests, all offline — the Gemini wire protocol is faked at the frame level.
+489 tests, all offline — the Gemini wire protocol is faked at the frame level.
 CI covers Python 3.8–3.13, a stdlib-only run with no third-party packages, a
 build-and-install-the-wheel check, lint and a Docker build.
 

@@ -139,6 +139,11 @@ touching these areas, keep the tests green:
 * `test_packaging.WindowsLauncherTests.*` — the launcher cannot execute on the
   Linux CI runner, so these are content guards. Each was verified to fail by
   injecting the violation it forbids.
+* `test_packaging.MarkdownLinkTests` — every relative link and heading anchor in
+  the Markdown corpus resolves. Renaming a heading without updating what points
+  at it fails here. If you add an anchor link, the slug is GitHub's: lowercase,
+  punctuation dropped, and **each** space becomes one hyphen (so an em dash
+  removed between words leaves a double hyphen).
 
 ### Git-dependent tests must skip, not pass vacuously
 
