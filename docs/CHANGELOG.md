@@ -242,10 +242,31 @@ was reproduced.
 - `gemini-cookie-sync-extension/SETUP.md` simplified — the `jq` pipeline it
   prescribed is no longer needed.
 - `config.example.json` now lists every option.
+- `cloudflare/README.MD` gained a divergence table against the Python server,
+  verified against `worker.js` rather than assumed. Two silent-failure
+  behaviours are now called out: image parts are discarded without error, and
+  any unmatched `POST /v1/*` falls through to chat completions instead of
+  returning 501. A placeholder upstream URL reading
+  `github.com/your-repo/gemini-web2api` was corrected.
+
+### Cloudflare Worker (1.6.0-cf-multifingerprint)
+
+- Added `gemini-3.7-flash`, bringing the Worker to 8 models. Its
+  `(mode, think) = (1, 4)` matches the existing `gemini-3.6-flash`, and the
+  emitted payload was verified byte-identical apart from the per-request UUID in
+  slot 59 — so this cannot change behaviour for any existing model.
+- `gemini-3.1-pro-enhanced` was deliberately **not** added. It requires payload
+  slots 31 and 80, but `buildPayload()` allocates `new Array(80)` (slot 80 is out
+  of range; JS would silently grow the array to 81 rather than raise, sending a
+  payload shape that differs from the Python server's 102 slots), and
+  `resolveModel()` has no field to carry extra slots at all. Supporting it means
+  changing the payload shape for *every* model, which is not justified without
+  end-to-end verification against `gemini.google.com`. The gap and the required
+  changes are documented in `cloudflare/README.MD`.
 
 ### Tests
 
-- 18 tests → **411**, all offline. The Gemini wire protocol is faked at the frame
+- 18 tests → **417**, all offline. The Gemini wire protocol is faked at the frame
   level so real parsing and real HTTP handling are exercised without a network.
 - New modules for config layering, cookie formats, model resolution, protocol
   framing and streaming, prompt/tool parsing, every HTTP route, security
@@ -254,6 +275,22 @@ was reproduced.
   stays a shim, `config.example.json` matches `DEFAULT_CONFIG`, every model
   appears in the README, the README documents no nonexistent model, versions
   agree, and no secret file is tracked by git.
+- Documentation is now checked for *accuracy*, not just presence — the original
+  defect was pages that existed and were wrong. Tests assert every endpoint in
+  `API.md` is really routed, every `DEFAULT_CONFIG` key is documented, every
+  docs page is reachable from the index and the README, the current version has
+  a CHANGELOG entry, and the test count both READMEs advertise matches the suite
+  that actually runs. (That last guard caught its own author: adding tests
+  invalidated the count in the same commit that added them.)
+- `requires-python = ">=3.8"` is enforced by AST inspection rather than trust,
+  since `compile()` under a newer interpreter accepts newer syntax and proves
+  nothing. A first attempt scanned source text with a regex and false-positived
+  on a `|` inside a regex *string literal* in `gemini.py`; only nodes in
+  annotation position are inspected now.
+- Worker/Python model parity is checked by parsing `cloudflare/worker.js`:
+  phantom models, `(mode, think)` disagreements, and undocumented gaps all fail,
+  and `node --check` guards the Worker's syntax (skipped when Node is absent).
+  Each guard was verified to fail on an injected violation before being kept.
 
 ---
 

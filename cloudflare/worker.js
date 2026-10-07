@@ -440,10 +440,15 @@ function getRandomSecChUaPlatform() {
 //   4 = AUTO（自动选择思考深度，由 Gemini 决定）
 
 var MODELS = {
+  'gemini-3.7-flash': {
+    mode: 1,        // FAST - 快速模式
+    think: 4,       // AUTO - 自动选择思考深度
+    desc: 'Latest all-around model (Gemini 3.7 Flash)',
+  },
   'gemini-3.6-flash': {
     mode: 1,        // FAST - 快速模式
     think: 4,       // AUTO - 自动选择思考深度
-    desc: 'Latest all-around model (Gemini 3.6 Flash)',
+    desc: 'All-around model (Gemini 3.6 Flash)',
   },
   'gemini-3.5-flash': {
     mode: 1,        // FAST
@@ -2586,7 +2591,7 @@ export default {
       if (path === '/' || path === '/health') {
         return sendJSON({
           status: 'ok',
-          version: '1.5.0-cf-multifingerprint',
+          version: '1.6.0-cf-multifingerprint',
           platform: 'Cloudflare Workers',
           models: Object.keys(MODELS),
           defaultModel: config.defaultModel,

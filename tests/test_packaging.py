@@ -421,6 +421,129 @@ class Python38CompatibilityTests(unittest.TestCase):
         self.assertEqual(offenders, {}, f"3.9+ stdlib APIs used: {offenders}")
 
 
+class WorkerParityTests(unittest.TestCase):
+    """The Cloudflare Worker is a separate implementation, but its model table
+    should not silently drift from the Python one.
+
+    The Worker shipped 7 models while Python shipped 9, with nothing recording
+    the gap. These tests parse cloudflare/worker.js directly so a model added on
+    one side and forgotten on the other fails the build. They assert parity of
+    *shared* models only — the Worker legitimately lacks one, and that exception
+    is required to be documented rather than merely tolerated.
+    """
+
+    WORKER = os.path.join(REPO_ROOT, "cloudflare", "worker.js")
+    # Models the Worker genuinely cannot support, and why.
+    KNOWN_GAPS = {"gemini-3.1-pro-enhanced"}
+
+    def _worker_models(self):
+        """Parse the Worker's MODELS table: name -> (mode, think)."""
+        with open(self.WORKER, encoding="utf-8") as handle:
+            source = handle.read()
+        start = source.index("var MODELS = {")
+        end = source.index("\n};", start)
+        block = source[start:end]
+        found = {}
+        for entry in re.finditer(
+            r"'([\w.\-]+)'\s*:\s*\{(.*?)\}", block, re.DOTALL
+        ):
+            name, body = entry.group(1), entry.group(2)
+            mode = re.search(r"\bmode\s*:\s*(\d+)", body)
+            think = re.search(r"\bthink\s*:\s*(\d+)", body)
+            found[name] = (
+                int(mode.group(1)) if mode else None,
+                int(think.group(1)) if think else None,
+            )
+        return found
+
+    def setUp(self):
+        if not os.path.exists(self.WORKER):
+            self.skipTest("cloudflare/worker.js is not present")
+
+    def test_worker_models_parsed(self):
+        models = self._worker_models()
+        self.assertGreaterEqual(len(models), 8, f"parsed only {models}")
+        for name, (mode, think) in models.items():
+            with self.subTest(model=name):
+                self.assertIsNotNone(mode, f"{name} has no mode")
+                self.assertIsNotNone(think, f"{name} has no think")
+
+    def test_no_phantom_worker_models(self):
+        """Every model the Worker advertises must exist in Python's table."""
+        from gemini_web2api.models import MODELS
+        phantom = set(self._worker_models()) - set(MODELS)
+        self.assertEqual(
+            phantom, set(),
+            f"worker.js advertises models absent from gemini_web2api: {phantom}",
+        )
+
+    def test_shared_models_agree_on_mode_and_think(self):
+        """A shared model must select the same MODE_CATEGORY and think level."""
+        from gemini_web2api.models import MODELS
+        mismatched = {}
+        for name, (mode, think) in self._worker_models().items():
+            py = MODELS.get(name)
+            if not py:
+                continue
+            if py["mode"] != mode or py["think"] != think:
+                mismatched[name] = {
+                    "python": (py["mode"], py["think"]),
+                    "worker": (mode, think),
+                }
+        self.assertEqual(
+            mismatched, {},
+            f"worker/python disagree on (mode, think): {mismatched}",
+        )
+
+    def test_known_gaps_are_documented(self):
+        """Each unsupported model must be explained, not silently missing."""
+        from gemini_web2api.models import MODELS
+        with open(os.path.join(REPO_ROOT, "cloudflare", "README.MD"),
+                  encoding="utf-8") as handle:
+            doc = handle.read()
+        for name in self.KNOWN_GAPS:
+            with self.subTest(model=name):
+                self.assertIn(name, MODELS, f"{name} is no longer a Python model")
+                self.assertNotIn(
+                    f"'{name}'", self._worker_models_source(),
+                    f"{name} is now supported by the Worker; update KNOWN_GAPS",
+                )
+                self.assertIn(name, doc, f"{name} gap is not documented")
+
+    def test_no_undocumented_gaps(self):
+        """Any Python model the Worker lacks must be a declared known gap."""
+        from gemini_web2api.models import MODELS
+        gaps = set(MODELS) - set(self._worker_models())
+        self.assertEqual(
+            gaps, self.KNOWN_GAPS,
+            f"undocumented worker gaps: {gaps - self.KNOWN_GAPS}; "
+            f"stale KNOWN_GAPS entries: {self.KNOWN_GAPS - gaps}",
+        )
+
+    def _worker_models_source(self):
+        with open(self.WORKER, encoding="utf-8") as handle:
+            source = handle.read()
+        start = source.index("var MODELS = {")
+        return source[start:source.index("\n};", start)]
+
+    def test_worker_javascript_parses(self):
+        """A syntax error in the Worker would only surface at deploy time."""
+        import shutil
+        import subprocess
+
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is not installed")
+        result = subprocess.run(
+            [node, "--check", self.WORKER],
+            capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(
+            result.returncode, 0,
+            f"node --check failed on cloudflare/worker.js:\n{result.stderr}",
+        )
+
+
 class SyntaxTests(unittest.TestCase):
     def test_every_python_file_compiles(self):
         failures = []

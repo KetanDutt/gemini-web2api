@@ -269,7 +269,8 @@ SAPISID = "sapisid_1| sapisid_2| sapisid_3"
 
 | 模型 ID | 类型 | 说明 |
 |---------|------|------|
-| `gemini-3.6-flash` | FAST | 最新全能模型 |
+| `gemini-3.7-flash` | FAST | 最新全能模型 |
+| `gemini-3.6-flash` | FAST | 全能模型 |
 | `gemini-3.5-flash` | FAST | 3.6 Flash 的别名 |
 | `gemini-3.5-flash-thinking` | THINKING | 深度思考模式 |
 | `gemini-3.1-pro` | PRO | 专业版（需 Cookie） |
@@ -287,12 +288,12 @@ SAPISID = "sapisid_1| sapisid_2| sapisid_3"
 
 **Worker 是独立实现，不是从 Python 代码构建的。** 两者运行环境不同（Workers 无 Node/Python 运行时），无法共享模块，因此功能和模型列表会各自演进，**不保证一致**。选型前请对照下表。
 
-Worker 当前支持 **7 个模型**，Python 版本支持 **9 个**。
+Worker 当前支持 **8 个模型**，Python 版本支持 **9 个**。
 
 | 能力 | Cloudflare Worker | Python 版本 |
 |------|-------------------|-------------|
-| `gemini-3.7-flash` | ❌ 未收录 | ✅ |
-| `gemini-3.1-pro-enhanced` | ❌ 未收录 | ✅ |
+| `gemini-3.7-flash` | ✅ | ✅ |
+| `gemini-3.1-pro-enhanced` | ❌ 见下方说明 | ✅ |
 | 多 Cookie 轮换（多账号随机） | ✅ | ❌ |
 | 浏览器指纹轮换（8 种 UA + 6 种语言） | ✅ | ❌ |
 | 请求前随机延迟抖动 | ✅ | ❌ |
@@ -309,13 +310,25 @@ Worker 当前支持 **7 个模型**，Python 版本支持 **9 个**。
 | Web 控制台 | ❌ | ✅ |
 | 环境变量配置 | ✅ Worker 变量 | ✅ `GEMINI_WEB2API_*` |
 
-> 两者的版本号是独立序列：Worker 为 `1.5.0-cf-multifingerprint`，Python 包为 `1.2.0`。版本号接近纯属巧合，不代表功能对应。
+> 两者的版本号是独立序列：Worker 为 `1.6.0-cf-multifingerprint`，Python 包为 `1.2.0`。版本号接近纯属巧合，不代表功能对应。
 
 ### 两个需要特别注意的行为差异
 
 **图片会被静默丢弃。** Worker 解析多模态消息数组时只提取 `type` 为 `text` / `input_text` 的部分，`image_url` 与 `inlineData` 被直接忽略且**不报错**。客户端会以为图片已被理解，实际只发送了文字。Python 版本会真正下载并上传图片，或在无法处理时返回 400。
 
 **未匹配的 `POST /v1/*` 会被兜底转为 chat。** Worker 对 `/v1/` 下任何未识别的路径都调用 `handleChatCompletions`。这对容忍客户端路径差异有帮助，但意味着 `POST /v1/embeddings` 不会返回 `501 not implemented`，而是被当作聊天请求处理并产生一次 Gemini 调用。Python 版本对未实现的端点明确返回 501，对未知路径返回 404。
+
+### 为什么 Worker 没有 `gemini-3.1-pro-enhanced`
+
+不是遗漏，而是缺少必要的基础设施。该模型除了 `mode: 3` 之外，还需要写入 payload 的第 **31** 与第 **80** 槽位（Python 中为 `extra: {31: 2, 80: 3}`），而 Worker 目前：
+
+- `buildPayload()` 用 `new Array(80)` 构造 payload，**第 80 槽位越界**。JS 不会像 Python 那样抛 `IndexError`，而是把数组悄悄拉长到 81，于是发出的 payload 长度与 Python 版本的 102 槽位不一致，上游行为无法预测。
+- `resolveModel()` 的返回值只有 `{modelName, modelId, thinkMode, error}`，**没有承载额外槽位的字段**，全文件也不存在任何 `extra` 机制。
+- 因此需要同时改动 `resolveModel()` 的返回结构、`buildPayload()` 的签名与数组长度，以及两处调用点（约 1144 与 2104 行）。
+
+这属于会改变**所有模型**请求体形状的改动，在无法连接 `gemini.google.com` 做端到端验证的情况下风险过高，故未纳入本次改动。`gemini-3.7-flash` 则不同：它的 `(mode, think) = (1, 4)` 与既有的 `gemini-3.6-flash` 完全相同，经比对两者生成的 payload **逐字节一致**（唯一差异是第 59 槽位每次请求都会重新生成的 UUID），因此可以安全收录。
+
+如需在 Worker 上支持 `gemini-3.1-pro-enhanced`，请按上述三点改造，并用真实账号验证上游接受 102 槽位的 payload。
 
 **如何选择：**
 
@@ -331,6 +344,7 @@ Python 版本的完整文档见仓库根目录的 [`docs/`](../docs/README.md)�
 
 | 版本 | 日期 | 更新内容 |
 |------|------|---------|
+| 1.6.0 | 2026-10-07 | 新增 `gemini-3.7-flash`；补充与 Python 版本的差异对照表 |
 | 1.5.0 | 2026-07-31 | 新增多指纹轮换、多Cookie轮换、随机延迟机制 |
 | 1.4.0 | 2026-07-30 | 修复并发串扰、速率限制内存安全 |
 | 1.3.0 | 2026-07-29 | 修复 SSE 流式格式、NextChat 兼容性 |
