@@ -34,7 +34,6 @@ if _HERE not in sys.path:
 
 try:
     from gemini_web2api.__main__ import main
-    from gemini_web2api import __version__
 except ImportError as exc:  # pragma: no cover - only when the package is absent
     sys.stderr.write(
         "\n"
@@ -48,7 +47,9 @@ except ImportError as exc:  # pragma: no cover - only when the package is absent
         "  2. pip install gemini-web2api   (or: pip install . from the repo root)\n"
         "\n"
     )
-    raise SystemExit(1)
+    # `from None`: the diagnostic above is the whole point, and the ImportError
+    # is already interpolated into it. A chained traceback would bury it.
+    raise SystemExit(1) from None
 
 
 if __name__ == "__main__":
