@@ -34,8 +34,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install httpx
 
+      - name: Probe the toolchain the test guards depend on
+        run: |
+          echo "node: $(command -v node || echo MISSING) $(node --version 2>/dev/null || true)"
+          echo "git:  $(command -v git || echo MISSING)"
+
       - name: Run the test suite
-        run: python -m unittest discover -s tests -t . -v
+        run: |
+          python -m unittest discover -s tests -t . -v 2>&1 | tee /tmp/out.txt
+          echo "--- skip audit ---"
+          grep -cE '\.\.\. skipped' /tmp/out.txt || true
+          grep -E '\.\.\. skipped' /tmp/out.txt || echo "  (no skips)"
 
   test-without-httpx:
     name: stdlib-only fallback
