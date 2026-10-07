@@ -52,6 +52,56 @@ HAS_GIT = _git_repo_available()
 NO_GIT = "not a git working tree (sdist or git archive checkout)"
 
 
+def _repo_metadata_guarded(*parts):
+    """True when a guard on repository metadata should run.
+
+    `.gitignore`, `.gitattributes` and `.github/` are VCS and CI metadata. They
+    are deliberately absent from a source distribution, where they would mean
+    nothing, so guards on them skip there. But inside a git working tree their
+    absence is a defect, so the guard still runs and fails loudly. Skipping
+    whenever the file is merely missing would turn a deleted `.gitattributes`
+    into a silent pass - the same vacuous-green trap as a piped test runner.
+
+    Note this differs from `HAS_GIT`: a `git archive` tree has no `.git` yet
+    still carries every tracked file, so these guards run there too.
+    """
+    return os.path.exists(os.path.join(REPO_ROOT, *parts)) or HAS_GIT
+
+
+# Files setuptools puts in every sdist whatever MANIFEST.in says.
+_SDIST_ALWAYS_INCLUDED = {"pyproject.toml", "MANIFEST.in", "LICENSE", "README.md"}
+
+# Files that must never be in a distribution: VCS/CI metadata is meaningless
+# outside a repository, and the rest are local secrets MANIFEST.in excludes.
+_SDIST_NEVER_INCLUDED = {".gitignore", ".gitattributes", "config.json",
+                         "cookie.txt", "cookie.json", "gemini-auth.json", ".env"}
+
+
+def _manifest_include_names():
+    """The root-level names MANIFEST.in really includes, comments ignored.
+
+    Parsed rather than substring-matched: a comment mentioning a filename would
+    otherwise satisfy the check, which is how the `pipefail` guard was defeated
+    by its own explanatory prose.
+    """
+    names = set()
+    with open(os.path.join(REPO_ROOT, "MANIFEST.in"), encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split()
+            if parts[0] == "include":
+                names.update(parts[1:])
+    return names
+
+
+HAS_GITIGNORE = _repo_metadata_guarded(".gitignore")
+HAS_GITATTRIBUTES = _repo_metadata_guarded(".gitattributes")
+HAS_CI_WORKFLOW = _repo_metadata_guarded(".github", "workflows", "ci.yml")
+NO_REPO_METADATA = "repository metadata is not part of a source distribution"
+
+
 class PyprojectTests(unittest.TestCase):
     def setUp(self):
         if tomllib is None:
@@ -188,6 +238,7 @@ class PackageStructureTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "")
 
+    @unittest.skipUnless(HAS_GITIGNORE, NO_REPO_METADATA)
     def test_secrets_are_gitignored(self):
         with open(os.path.join(REPO_ROOT, ".gitignore"), encoding="utf-8") as handle:
             ignored = handle.read()
@@ -210,6 +261,48 @@ class PackageStructureTests(unittest.TestCase):
         self.assertNotIn("_compress_b64_if_needed", tools)
         self.assertNotIn("MAX_IMAGE_B64_SIZE", tools)
 
+    def test_the_sdist_ships_every_file_the_docs_promise(self):
+        """A distribution must not contradict the documentation inside it.
+
+        The sdist shipped `docs/DEPLOYMENT.md`, which walks the reader through
+        `docker-compose.yml` and the `Dockerfile`, and a README documenting
+        `python gemini_web2api.py` and embedding `logo.png` — while MANIFEST.in
+        omitted all four. Anyone installing from source got instructions
+        pointing at files that were not there, and on PyPI the rendered README
+        showed a broken image. Nothing failed loudly, because an sdist is only
+        ever read, never imported.
+
+        Only files that actually exist at the repository root are considered, so
+        prose about a `config.json` the reader creates, or a
+        `docker-compose.override.yml` they may write, is not a false positive.
+        """
+        pattern = re.compile(
+            r"\b[\w.-]+\.(?:py|png|yml|yaml|json|txt|bat|md)\b"
+            r"|\bDockerfile\b"
+            r"|\.(?:dockerignore|gitignore|gitattributes|env)\b")
+        doc_paths = ["README.md", "README_CN.md"]
+        docs_dir = os.path.join(REPO_ROOT, "docs")
+        doc_paths += [os.path.join("docs", n) for n in sorted(os.listdir(docs_dir))
+                      if n.endswith(".md")]
+        referenced = set()
+        for relative in doc_paths:
+            with open(os.path.join(REPO_ROOT, relative), encoding="utf-8") as handle:
+                referenced.update(pattern.findall(handle.read()))
+        existing = {name for name in os.listdir(REPO_ROOT)
+                    if os.path.isfile(os.path.join(REPO_ROOT, name))}
+        promised = sorted(referenced & existing)
+        # Guards the guard: a regex that matched nothing would pass vacuously.
+        self.assertGreater(len(promised), 5,
+                           f"the doc scan found only {promised} - the pattern is broken")
+        included = _manifest_include_names()
+        missing = [name for name in promised
+                   if name not in included
+                   and name not in _SDIST_ALWAYS_INCLUDED
+                   and name not in _SDIST_NEVER_INCLUDED]
+        self.assertEqual(
+            missing, [],
+            f"the shipped documentation tells the reader to use these root "
+            f"files, but MANIFEST.in leaves them out of the sdist: {missing}")
     def test_dockerfile_uses_the_package(self):
         with open(os.path.join(REPO_ROOT, "Dockerfile"), encoding="utf-8") as handle:
             dockerfile = handle.read()
@@ -1107,12 +1200,16 @@ class WindowsLauncherTests(unittest.TestCase):
                          f"start.bat has {bare_lf} LF-only line(s); cmd.exe needs CRLF")
         self.assertGreater(crlf, 100, "start.bat looks truncated")
 
+    @unittest.skipUnless(HAS_GITATTRIBUTES, NO_REPO_METADATA)
     def test_gitattributes_stores_the_launcher_as_crlf(self):
         """`text eol=crlf` only converts at checkout, so a GitHub ZIP download
         or `git archive` would still hand out LF-only bytes. `-text` stores the
         CRLF verbatim, making every retrieval path safe."""
         attrs_path = os.path.join(REPO_ROOT, ".gitattributes")
-        self.assertTrue(os.path.exists(attrs_path), ".gitattributes is missing")
+        # Reached only when the file exists or this is a git tree, where its
+        # absence is a defect rather than a reason to skip.
+        self.assertTrue(os.path.exists(attrs_path),
+                        ".gitattributes is missing from the repository")
         with open(attrs_path, encoding="utf-8") as handle:
             lines = [line.strip() for line in handle
                      if line.strip() and not line.startswith("#")]
@@ -1306,6 +1403,7 @@ def _pipes_status_away(line):
     return "|" in line.replace("||", "")
 
 
+@unittest.skipUnless(HAS_CI_WORKFLOW, NO_REPO_METADATA)
 class CIWorkflowTests(unittest.TestCase):
     """CI must fail when the suite fails.
 

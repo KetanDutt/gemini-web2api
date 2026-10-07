@@ -96,6 +96,21 @@ was reproduced.
 - `HEAD` and `OPTIONS` responses bypassed `send_json`, so they were never counted
   in `requests_served` or `status_codes` at all.
 
+- The source distribution contradicted its own documentation. `MANIFEST.in`
+  shipped `docs/DEPLOYMENT.md`, which walks the reader through `docker-compose.yml`
+  and the `Dockerfile`, and a README that documents `python gemini_web2api.py`
+  and embeds `<img src="logo.png">` — while omitting all four of those files,
+  plus `.dockerignore` and `docker-compose.local.yml`. Anyone installing from
+  source got instructions pointing at files that were not there, and because
+  `pyproject.toml` declares `readme = "README.md"`, the PyPI page rendered that
+  README with a broken image. The `Dockerfile` and `.dockerignore` omission was
+  the unsafe half: shipping one without the other lets a reader build an image
+  that bakes in their `config.json` and cookies, since the ignore file is what
+  keeps secrets out of the build context. Found by running the suite *from an
+  extracted sdist* rather than from a working tree — a `git archive` checkout
+  carries every tracked file and so hid it completely, reporting 507 passing.
+  From the sdist: 492 collected, 14 errors, 1 failure.
+
 - The Docker image could not be built. The Dockerfile's `COPY README.md
   LICENSE ./` and the `.dockerignore` entries `*.md` and `LICENSE` were added in
   the same pass and contradicted each other, so neither file reached the build
@@ -414,7 +429,7 @@ was reproduced.
 
 ### Tests
 
-- 18 tests → **507**, all offline. The Gemini wire protocol is faked at the frame
+- 18 tests → **508**, all offline. The Gemini wire protocol is faked at the frame
   level so real parsing and real HTTP handling are exercised without a network.
 - New modules for config layering, cookie formats, model resolution, protocol
   framing and streaming, prompt/tool parsing, every HTTP route, security
@@ -481,6 +496,25 @@ was reproduced.
   the parser itself, because a parser that finds nothing makes the other four
   pass vacuously. All five were verified to fail on an injected violation, and a
   sixth check confirms a genuine `set -o pipefail` does *not* trip them.
+- `test_the_sdist_ships_every_file_the_docs_promise` closes the class of defect
+  rather than the instance: it scans the shipped Markdown for root-level
+  filenames and requires every one that actually exists to be named by a
+  MANIFEST.in `include` directive. The directives are parsed, not
+  substring-matched, because a comment mentioning a filename would otherwise
+  satisfy the check — the same way the `pipefail` guard was defeated by its own
+  prose. Only files present at the repository root count, so instructions about
+  a `config.json` the reader writes, or a `docker-compose.override.yml` they may
+  create, are not false positives. Verified by dropping each of the eight
+  shipped root files from the manifest in turn, and by inventing a ninth.
+- Guards on repository metadata now distinguish *absent from a distribution*
+  from *deleted from the repo*. `.gitignore`, `.gitattributes` and
+  `.github/workflows/ci.yml` mean nothing in an sdist, so those tests skip
+  there — but inside a git working tree a missing one is a hard failure. A guard
+  that skips whenever its input file merely goes missing is a vacuous pass
+  wearing a disguise, so the gate is `file exists OR this is a git tree`, not
+  `file exists`. Note this is deliberately not `HAS_GIT`: a `git archive`
+  checkout has no `.git` yet still carries every tracked file, so the guards run
+  there. All three were verified to fail on a deleted file in a git tree.
 - `DockerfileTests` cross-checks the Dockerfile against `.dockerignore`
   **statically**, which is the only way to guard this without a container
   runtime: every `COPY` source must survive the ignore rules and exist in the

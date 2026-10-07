@@ -179,8 +179,40 @@ before this was noticed.
 Every git-based test therefore carries `@unittest.skipUnless(HAS_GIT, NO_GIT)`
 *and* asserts `result.returncode == 0`, so a green run in a real repository
 means git actually answered. `HAS_GIT` comes from
-`git rev-parse --is-inside-work-tree` at import time. Expect **5 skips** when
-running the suite from an extracted sdist.
+`git rev-parse --is-inside-work-tree` at import time.
+
+Guards on **repository metadata** (`.gitignore`, `.gitattributes`,
+`.github/workflows/ci.yml`) use a different gate, because those files are
+deliberately absent from a distribution but their disappearance from a
+repository is a defect. They are gated on `file exists OR this is a git tree`,
+not on `HAS_GIT` alone and not on existence alone:
+
+- existence alone would turn a deleted `.gitattributes` into a silent skip — a
+  vacuous pass wearing a disguise;
+- `HAS_GIT` alone would skip them in a `git archive` tree, which has no `.git`
+  yet still carries every tracked file.
+
+### Run the suite from an extracted sdist
+
+A working tree and a `git archive` checkout both carry every tracked file, so
+neither can tell you what a *source distribution* contains — `MANIFEST.in`
+decides that, and it is easy to ship documentation that promises files the
+sdist omits. That happened here: the sdist carried `docs/DEPLOYMENT.md` telling
+the reader to use `docker-compose.yml` and the `Dockerfile`, and a README
+documenting `python gemini_web2api.py` with an embedded `logo.png`, while
+`MANIFEST.in` listed none of them. Both a working tree and a `git archive`
+reported 507 passing; the sdist reported 14 errors.
+
+```bash
+python -m build --sdist && mkdir -p /tmp/sdx \
+  && tar -xzf dist/*.tar.gz -C /tmp/sdx && cd /tmp/sdx/*/ \
+  && python -m unittest discover -s tests -t .
+```
+
+Expect **508 tests and 12 skips** from an extracted sdist: 5 git-dependent and
+7 repository-metadata. Anything else means either a file stopped shipping or a
+guard started skipping for a new reason. `test_the_sdist_ships_every_file_the_docs_promise`
+guards the first half automatically.
 
 ### Editing `start.bat`
 
