@@ -17,6 +17,13 @@ rem ==========================================================================
 setlocal EnableExtensions
 cd /d "%~dp0"
 
+rem Capture the caller's arguments NOW, before the --port scan below shifts
+rem them away. Whether `shift` also empties `%*` is cmd.exe version-dependent;
+rem where it does, expanding %* after the loop yields nothing and every flag
+rem the user passed is silently dropped at launch. Holding them in a variable
+rem makes the behaviour identical on every Windows.
+set "USERARGS=%*"
+
 echo.
 echo   gemini-web2api - setup and launch
 echo   ---------------------------------
@@ -151,7 +158,9 @@ rem "can't connect" page on slower machines. PowerShell is used because nested
 rem quoting makes a delayed `start` unreliable in batch.
 start "" /min powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 4; Start-Process 'http://localhost:%PORT%/'" >nul 2>&1
 
-"%VPY%" -m gemini_web2api --port %PORT% %*
+rem A --port the caller passed appears twice here; argparse keeps the last,
+rem and both values are identical because PORT was taken from that argument.
+"%VPY%" -m gemini_web2api --port %PORT% %USERARGS%
 
 echo.
 echo   Server stopped.

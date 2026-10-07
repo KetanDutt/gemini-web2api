@@ -627,6 +627,31 @@ class WindowsLauncherTests(unittest.TestCase):
     def test_extra_arguments_are_passed_through(self):
         self.assertIn("%*", self.bat)
 
+    def test_arguments_are_captured_before_the_shift_loop(self):
+        """Whether `shift` also empties `%*` is cmd.exe version-dependent.
+
+        Where it does, the `:scanargs` loop consumes every argument and the
+        launch line expands `%*` to nothing, silently dropping flags the user
+        passed - `start.bat --api-key sk-x` would start an open server. The
+        arguments must therefore be copied into a variable before any shift,
+        and that variable must be what the launch line expands.
+        """
+        capture = self.bat.index('set "USERARGS=%*"')
+        loop = self.bat.index(":scanargs")
+        launch = self.bat.index("-m gemini_web2api --port")
+        self.assertLess(capture, loop,
+                        "arguments must be captured before :scanargs shifts them")
+        self.assertLess(loop, launch)
+        self.assertIn("--port %PORT% %USERARGS%", self.bat)
+        # A bare %* on the launch line would reintroduce the bug.
+        self.assertNotIn("--port %PORT% %*", self.bat)
+
+    def test_shift_loop_terminates(self):
+        """A `goto` loop with no exit is a hung window on double-click."""
+        self.assertIn('if "%~1"=="" goto :argsdone', self.bat)
+        self.assertIn(":argsdone", self.bat)
+        self.assertGreater(self.bat.index(":argsdone"), self.bat.index(":scanargs"))
+
     def test_cli_port_overrides_the_config(self):
         self.assertIn("ARGPORT", self.bat)
 

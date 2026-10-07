@@ -109,6 +109,14 @@ was reproduced.
 - The lint job checked `gemini_web2api tests` but not `scripts/`, so the Python
   the Windows launcher depends on was never linted or compile-checked in CI.
 
+- `start.bat` expanded `%*` on the launch line, *after* its `--port` scan had
+  run `shift` over every argument. Whether `shift` also empties `%*` is
+  cmd.exe version-dependent; where it does, the launcher silently discarded
+  every flag the user passed, so `start.bat --api-key sk-secret` would have
+  started an open, unauthenticated server while printing the key in its banner.
+  The arguments are now captured into `USERARGS` before any `shift`, making the
+  behaviour identical on every Windows.
+
 - A stream that failed mid-flight never incremented `upstream_failures`. The
   non-streaming path routes through `_upstream_failure()`, which counts it; the
   streaming path caught the exception, emitted an SSE error event and moved on.
@@ -350,7 +358,7 @@ was reproduced.
 
 ### Tests
 
-- 18 tests → **482**, all offline. The Gemini wire protocol is faked at the frame
+- 18 tests → **484**, all offline. The Gemini wire protocol is faked at the frame
   level so real parsing and real HTTP handling are exercised without a network.
 - New modules for config layering, cookie formats, model resolution, protocol
   framing and streaming, prompt/tool parsing, every HTTP route, security

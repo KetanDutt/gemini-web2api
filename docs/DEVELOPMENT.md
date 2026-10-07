@@ -159,6 +159,14 @@ and `test_git_stores_the_launcher_blob_as_crlf` will fail. Restore with:
 git add --renormalize start.bat
 ```
 
+**Do not expand `%*` after a `shift`.** Whether `shift` also empties `%*` is
+cmd.exe version-dependent. The launcher scans its arguments for `--port` with a
+`shift` loop, so the caller's arguments are copied into `USERARGS` *before* that
+loop and the launch line expands the variable. Expanding `%*` directly would
+silently drop every flag on some Windows versions — `start.bat --api-key
+sk-secret` would start an open server while still printing the key.
+`test_arguments_are_captured_before_the_shift_loop` guards the ordering.
+
 Anything reading or writing JSON belongs in `scripts/win_setup.py`, not in the
 batch file — batch quoting cannot express it reliably, and Python can be tested.
 That helper prints `PORT=<n>` / `CREATED=<0|1>` on stdout for the batch file to
