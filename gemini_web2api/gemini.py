@@ -1,83 +1,336 @@
-"""Gemini StreamGenerate protocol implementation with httpx streaming."""
-import json
-import time
-import uuid
-import re
-import urllib.request
-import urllib.parse
-import ssl
-import os
+"""Gemini Web StreamGenerate protocol implementation.
+
+Talks to the same endpoint the Gemini web app uses and converts between that
+internal protobuf-like framing and plain text. Two transports are supported:
+
+* ``httpx`` — real incremental streaming plus connection pooling/keep-alive.
+* ``urllib`` — dependency-free fallback; streaming is buffered and delivered as
+  a single chunk.
+"""
+import contextlib
 import hashlib
+import json
+import os
+import re
+import ssl
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
 
 try:
     import httpx
     HAS_HTTPX = True
-except ImportError:
+except ImportError:  # pragma: no cover - depends on the environment
+    httpx = None
     HAS_HTTPX = False
 
-from .config import CONFIG
+from .config import CONFIG, apply_defaults, is_explicit
+
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
+GEMINI_ORIGIN = "https://gemini.google.com"
+
+# Raised when Gemini itself rejects the request. Carries the upstream code so
+# callers can map it to a sensible HTTP status instead of a blanket 502.
+class GeminiUpstreamError(RuntimeError):
+    def __init__(self, message, code=None, status=None):
+        super().__init__(message)
+        self.code = code
+        self.status = status
+
 
 _ssl_ctx = None
-_cookie_cache = {"str": "", "sapisid": None, "mtime": 0}
+_cookie_cache = {"str": "", "sapisid": None, "mtime": None, "path": None}
 _httpx_client = None
+_client_lock = threading.Lock()
+_ssl_lock = threading.Lock()
+_bl_lock = threading.Lock()
+_bl_last_attempt = [0.0]
+
+# Never refresh the build tag more than once per minute, so a hard outage does
+# not turn into a request storm against gemini.google.com.
+_BL_REFRESH_COOLDOWN_SEC = 60
+
+LOG_LEVELS = {"debug": 10, "info": 20, "warning": 30, "error": 40}
+_log_level = [LOG_LEVELS["info"]]
 
 
-def log(msg: str):
-    if CONFIG["log_requests"]:
-        import sys
-        sys.stderr.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
-        sys.stderr.flush()
+def set_log_level(level):
+    """Set the minimum severity that reaches stderr."""
+    _log_level[0] = LOG_LEVELS.get(str(level).lower(), LOG_LEVELS["info"])
+
+
+def log(msg, level="info"):
+    """Write a timestamped line to stderr when logging is enabled."""
+    if not CONFIG.get("log_requests", True):
+        return
+    if LOG_LEVELS.get(level, 20) < _log_level[0]:
+        return
+    import sys
+    sys.stderr.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
+    sys.stderr.flush()
 
 
 def _get_ssl_ctx():
     global _ssl_ctx
     if _ssl_ctx is None:
-        _ssl_ctx = ssl.create_default_context()
+        with _ssl_lock:
+            if _ssl_ctx is None:
+                _ssl_ctx = ssl.create_default_context()
     return _ssl_ctx
 
 
 def _get_httpx_client():
+    """Return a process-wide pooled httpx client.
+
+    Reusing one client keeps TLS sessions and TCP connections alive across
+    requests; constructing a client per request (as the old code did) paid a
+    full handshake on every call.
+    """
     global _httpx_client
-    if _httpx_client is None and HAS_HTTPX:
-        proxy = CONFIG.get("proxy")
-        transport = httpx.HTTPTransport(proxy=proxy) if proxy else None
-        _httpx_client = httpx.Client(transport=transport, timeout=CONFIG["request_timeout_sec"], verify=True)
+    if not HAS_HTTPX:
+        return None
+    if _httpx_client is not None:
+        return _httpx_client
+    with _client_lock:
+        if _httpx_client is None:
+            proxy = CONFIG.get("proxy")
+            transport = httpx.HTTPTransport(proxy=proxy, retries=0) if proxy else None
+            _httpx_client = httpx.Client(
+                transport=transport,
+                timeout=CONFIG.get("request_timeout_sec", 180),
+                verify=True,
+                # We set Origin/Referer/User-Agent explicitly per request.
+                trust_env=not proxy,
+            )
     return _httpx_client
 
 
-def load_cookie() -> tuple:
-    """Load cookie from file with mtime-based caching."""
-    cookie_file = CONFIG.get("cookie_file")
-    if not cookie_file or not os.path.exists(cookie_file):
-        return "", None
-    try:
-        mtime = os.path.getmtime(cookie_file)
-        if mtime == _cookie_cache["mtime"] and _cookie_cache["str"]:
-            return _cookie_cache["str"], _cookie_cache["sapisid"]
-        with open(cookie_file, "r") as f:
-            content = f.read().strip()
-        if content.startswith("{"):
+def close_client():
+    """Release the pooled client. Used at shutdown and by tests."""
+    global _httpx_client
+    with _client_lock:
+        client, _httpx_client = _httpx_client, None
+    if client is not None:
+        with contextlib.suppress(Exception):  # pragma: no cover - best effort
+            client.close()
+
+
+# ─── Cookie / auth ───────────────────────────────────────────────────────────
+
+# Fields a cookie file may supply in addition to the cookie string itself.
+# `gemini-cookie-sync-extension` exports all of these; previously only `cookie`
+# and `sapisid` were read, so users had to hand-edit config.json with jq.
+_AUTH_FILE_CONFIG_KEYS = {
+    "xsrf_token": "xsrf_token",
+    "gemini_bl": "gemini_bl",
+    "auth_user": "auth_user",
+}
+
+
+def _parse_cookie_pairs(text):
+    """Parse ``name=value`` pairs out of a cookie string.
+
+    Tolerates the layouts people actually paste: ``;`` with or without a space,
+    newlines, a leading ``Cookie:`` header, and trailing semicolons. Splitting
+    on the literal ``"; "`` (as before) silently lost SAPISID for anything else,
+    which dropped the Authorization header and quietly downgraded Pro to Flash.
+    """
+    text = text.strip()
+    if text.lower().startswith("cookie:"):
+        text = text[len("cookie:"):]
+    pairs = {}
+    for chunk in re.split(r"[;\r\n]+", text):
+        chunk = chunk.strip().strip(",")
+        if not chunk or "=" not in chunk:
+            continue
+        name, _, value = chunk.partition("=")
+        name, value = name.strip(), value.strip()
+        if name:
+            pairs[name] = value
+    return pairs
+
+
+# curl marks HttpOnly cookies with this prefix on an otherwise ordinary record.
+# Google's session cookies (SID, __Secure-1PSID, ...) are HttpOnly, so skipping
+# comment lines wholesale would silently drop exactly the ones that matter.
+_HTTP_ONLY_PREFIX = "#HttpOnly_"
+
+
+def _parse_netscape(text):
+    """Parse a Netscape/curl cookie-jar file into ``{name: value}``.
+
+    Browser "export cookies" extensions produce this format; the README used to
+    tell users to convert it to a single line by hand.
+    """
+    pairs = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith(_HTTP_ONLY_PREFIX):
+            line = line[len(_HTTP_ONLY_PREFIX):]
+        elif line.startswith("#"):
+            continue
+        # domain, include-subdomains, path, secure, expiry, name, value
+        fields = line.split("\t")
+        if len(fields) < 7:
+            continue
+        name, value = fields[5].strip(), fields[6].strip()
+        if name:
+            pairs[name] = value
+    return pairs
+
+
+def _looks_like_netscape(text):
+    """Detect a cookie jar without relying on the first line being a record.
+
+    Real exports usually start with a comment banner, so scanning only line one
+    misses them.
+    """
+    head = text.lstrip()
+    if head.startswith("# Netscape HTTP Cookie File") or head.startswith("# HTTP Cookie File"):
+        return True
+    for line in head.splitlines()[:20]:
+        candidate = line.strip()
+        if candidate.startswith(_HTTP_ONLY_PREFIX):
+            candidate = candidate[len(_HTTP_ONLY_PREFIX):]
+        if candidate.startswith("#") or "\t" not in candidate:
+            continue
+        if len(candidate.split("\t")) >= 7:
+            return True
+    return False
+
+
+def _cookie_string_from_objects(items):
+    """Build a cookie header from a list of ``{name, value}`` objects."""
+    pairs = {}
+    for item in items:
+        if isinstance(item, dict) and item.get("name"):
+            pairs[str(item["name"])] = str(item.get("value", ""))
+    return pairs
+
+
+def _parse_auth_file(content):
+    """Return ``(cookie_str, sapisid, overrides)`` from any supported layout.
+
+    Accepts: a plain ``name=value; ...`` header, a Netscape/curl cookie jar, the
+    ``{"cookie": ..., "sapisid": ...}`` object, the ``gemini-auth.json`` export
+    produced by the bundled browser extension, and a raw array of cookie objects.
+    """
+    overrides = {}
+    content = content.strip()
+
+    if content.startswith(("[", "{")):
+        try:
             data = json.loads(content)
-            cookie_str = data.get("cookie", "")
-            sapisid = data.get("sapisid", "")
-        else:
-            cookie_str = content
-            pairs = dict(p.split("=", 1) for p in cookie_str.split("; ") if "=" in p)
-            sapisid = pairs.get("SAPISID", "")
-        _cookie_cache.update({"str": cookie_str, "sapisid": sapisid or None, "mtime": mtime})
-        return cookie_str, sapisid if sapisid else None
-    except Exception as e:
-        log(f"Cookie load error: {e}")
+        except (json.JSONDecodeError, ValueError) as exc:
+            log(f"Cookie file is not valid JSON: {exc}", "error")
+            return "", None, overrides
+
+        if isinstance(data, list):
+            pairs = _cookie_string_from_objects(data)
+            cookie_str = "; ".join(f"{k}={v}" for k, v in pairs.items())
+            return cookie_str, pairs.get("SAPISID") or None, overrides
+
+        if not isinstance(data, dict):
+            return "", None, overrides
+
+        cookie_str = data.get("cookie") or data.get("cookie_string") or ""
+        sapisid = data.get("sapisid") or ""
+        if not cookie_str and isinstance(data.get("cookies"), (list, dict)):
+            raw = data["cookies"]
+            pairs = (_cookie_string_from_objects(raw) if isinstance(raw, list)
+                     else {str(k): str(v) for k, v in raw.items()})
+            cookie_str = "; ".join(f"{k}={v}" for k, v in pairs.items())
+            sapisid = sapisid or pairs.get("SAPISID", "")
+        if not sapisid and cookie_str:
+            sapisid = _parse_cookie_pairs(cookie_str).get("SAPISID", "")
+        for cfg_key, file_key in _AUTH_FILE_CONFIG_KEYS.items():
+            if data.get(file_key) not in (None, ""):
+                overrides[cfg_key] = data[file_key]
+        return cookie_str.strip(), (sapisid or None), overrides
+
+    if _looks_like_netscape(content):
+        pairs = _parse_netscape(content)
+        cookie_str = "; ".join(f"{k}={v}" for k, v in pairs.items())
+        return cookie_str, pairs.get("SAPISID") or None, overrides
+
+    pairs = _parse_cookie_pairs(content)
+    cookie_str = "; ".join(f"{k}={v}" for k, v in pairs.items())
+    return cookie_str, pairs.get("SAPISID") or None, overrides
+
+
+def load_cookie():
+    """Load ``(cookie_str, sapisid)`` from the configured cookie file.
+
+    Results are cached by ``(path, mtime, size)`` so a request does not touch
+    the filesystem more than once per change, and an edited cookie takes effect
+    without a restart.
+    """
+    cookie_file = CONFIG.get("cookie_file")
+    if not cookie_file:
+        return "", None
+    if not os.path.exists(cookie_file):
+        if _cookie_cache["path"] != cookie_file:
+            log(f"Cookie file not found: {cookie_file}", "warning")
+            _cookie_cache["path"] = cookie_file
+        return "", None
+
+    try:
+        stat = os.stat(cookie_file)
+        fingerprint = (cookie_file, stat.st_mtime, stat.st_size)
+        cached = (_cookie_cache["path"], _cookie_cache["mtime"], len(_cookie_cache["str"]))
+        if _cookie_cache["str"] and cached[0] == cookie_file and _cookie_cache.get("fingerprint") == fingerprint:
+            return _cookie_cache["str"], _cookie_cache["sapisid"]
+
+        with open(cookie_file, encoding="utf-8") as f:
+            content = f.read()
+
+        cookie_str, sapisid, overrides = _parse_auth_file(content)
+        if overrides:
+            applied = apply_defaults(overrides, source=os.path.basename(cookie_file))
+            if applied:
+                log(f"Applied from {os.path.basename(cookie_file)}: {', '.join(applied)}")
+
+        _cookie_cache.update({
+            "str": cookie_str,
+            "sapisid": sapisid,
+            "path": cookie_file,
+            "mtime": stat.st_mtime,
+            "fingerprint": fingerprint,
+        })
+        if cookie_str and not sapisid:
+            log("Cookie loaded but SAPISID is absent — authenticated Pro routing "
+                "will not be available.", "warning")
+        return cookie_str, sapisid
+    except OSError as exc:
+        log(f"Cookie load error: {exc}", "error")
+        return _cookie_cache["str"], _cookie_cache["sapisid"]
+    except Exception as exc:  # pragma: no cover - defensive
+        log(f"Cookie load error: {exc}", "error")
         return _cookie_cache["str"], _cookie_cache["sapisid"]
 
 
-def make_sapisidhash(sapisid: str) -> str:
+def reset_cookie_cache():
+    """Drop the cached cookie so the next request re-reads the file."""
+    _cookie_cache.update({"str": "", "sapisid": None, "mtime": None,
+                          "path": None, "fingerprint": None})
+
+
+def make_sapisidhash(sapisid):
+    """Build the ``SAPISIDHASH`` Authorization header Google's web apps use."""
     ts = int(time.time())
-    h = hashlib.sha1(f"{ts} {sapisid} https://gemini.google.com".encode()).hexdigest()
-    return f"SAPISIDHASH {ts}_{h}"
+    digest = hashlib.sha1(f"{ts} {sapisid} {GEMINI_ORIGIN}".encode()).hexdigest()
+    return f"SAPISIDHASH {ts}_{digest}"
 
 
-def _account_prefix() -> str:
+def _account_prefix():
     """Return the Gemini account path prefix for non-default Google accounts."""
     auth_user = CONFIG.get("auth_user")
     if auth_user is None or auth_user == "":
@@ -85,18 +338,21 @@ def _account_prefix() -> str:
     return f"/u/{auth_user}"
 
 
-def _build_headers() -> dict:
-    account_prefix = _account_prefix()
+def _build_headers():
+    # load_cookie() may adopt auth_user/xsrf_token/gemini_bl from a
+    # gemini-auth.json export, so it has to run before anything reads them —
+    # otherwise the very first request after startup is built from defaults.
+    cookie_str, sapisid = load_cookie()
+    prefix = _account_prefix()
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
-        "Origin": "https://gemini.google.com",
-        "Referer": f"https://gemini.google.com{account_prefix}/app",
+        "Origin": GEMINI_ORIGIN,
+        "Referer": f"{GEMINI_ORIGIN}{prefix}/app",
         "X-Same-Domain": "1",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "User-Agent": USER_AGENT,
     }
-    if account_prefix:
+    if prefix:
         headers["X-Goog-AuthUser"] = str(CONFIG["auth_user"])
-    cookie_str, sapisid = load_cookie()
     if cookie_str:
         headers["Cookie"] = cookie_str
     if sapisid:
@@ -104,18 +360,25 @@ def _build_headers() -> dict:
     return headers
 
 
-def _apply_chat_persistence_flags(inner: list) -> None:
+def _apply_chat_persistence_flags(inner):
     """Apply Gemini Web persistence flags to an outgoing request payload."""
     if CONFIG.get("temporary_chats", False):
-        # Match Gemini Web temporary-chat requests.
+        # Match Gemini Web temporary-chat requests: nothing is written to the
+        # account's conversation history.
         inner[41] = [1]
         inner[45] = 1
     else:
         inner[41] = [2]
 
 
-def _build_payload(prompt: str, model_id: int, think_mode: int, file_refs: list = None, extra_fields: dict = None) -> str:
-    inner = [None] * 102
+def _build_payload(prompt, model_id, think_mode, file_refs=None, extra_fields=None):
+    from .models import PAYLOAD_SLOTS
+
+    # See _build_headers: the auth file can supply the XSRF token, and it is
+    # only read as a side effect of loading the cookie. Cached, so this is one
+    # stat() on a warm process.
+    load_cookie()
+    inner = [None] * PAYLOAD_SLOTS
     if file_refs:
         refs = [[None, None, ref] for ref in file_refs]
         inner[0] = [prompt, 0, None, refs, None, None, 0]
@@ -138,8 +401,10 @@ def _build_payload(prompt: str, model_id: int, think_mode: int, file_refs: list 
     inner[68] = 1
     inner[79] = model_id
     if extra_fields:
-        for k, v in extra_fields.items():
-            inner[k] = v
+        for key, value in extra_fields.items():
+            index = int(key)
+            if 0 <= index < len(inner):
+                inner[index] = value
     outer = [None, json.dumps(inner)]
     params = {"f.req": json.dumps(outer)}
     if CONFIG.get("xsrf_token"):
@@ -147,93 +412,300 @@ def _build_payload(prompt: str, model_id: int, think_mode: int, file_refs: list 
     return urllib.parse.urlencode(params)
 
 
-def _get_url() -> str:
-    reqid = int(time.time()) % 1000000
-    account_prefix = _account_prefix()
+def _get_url(reqid=None):
+    if reqid is None:
+        reqid = int(time.time()) % 1000000
+    prefix = _account_prefix()
     return (
-        f"https://gemini.google.com{account_prefix}/_/BardChatUi/data/"
+        f"{GEMINI_ORIGIN}{prefix}/_/BardChatUi/data/"
         "assistant.lamda.BardFrontendService/StreamGenerate"
-        f"?bl={CONFIG['gemini_bl']}&hl=en&_reqid={reqid}&rt=c"
+        f"?bl={urllib.parse.quote(CONFIG['gemini_bl'], safe='')}&hl=en&_reqid={reqid}&rt=c"
     )
 
 
-def clean_text(text: str, strip: bool = True) -> str:
-    text = re.sub(
-        r'```(?:python|javascript|text)\?code_(?:reference|stdout)&code_event_index=\d+\n.*?```\n?',
-        '', text, flags=re.DOTALL
-    )
-    text = re.sub(r'http://googleusercontent\.com/card_content/\d+\n?', '', text)
+# ─── Build tag (`bl`) discovery ──────────────────────────────────────────────
+
+_BL_PATTERN = re.compile(r"(boq_assistant-bard-web-server_\d+\.\d+_p\d+)")
+
+
+def fetch_latest_bl(timeout=8):
+    """Scrape the current ``bl`` build tag from the Gemini page.
+
+    Returns ``None`` when it cannot be determined; callers must treat that as
+    "keep the configured value", never as a fatal error.
+    """
+    try:
+        client = _get_httpx_client()
+        if client is not None:
+            resp = client.get(
+                f"{GEMINI_ORIGIN}{_account_prefix()}/app",
+                headers={"User-Agent": USER_AGENT, **_cookie_headers()},
+                timeout=timeout,
+            )
+            html = resp.text
+        else:
+            req = urllib.request.Request(
+                f"{GEMINI_ORIGIN}{_account_prefix()}/app",
+                headers={"User-Agent": USER_AGENT, **_cookie_headers()},
+            )
+            html = _urlopen(req, timeout=timeout).read().decode("utf-8", errors="replace")
+        match = _BL_PATTERN.search(html)
+        return match.group(1) if match else None
+    except Exception as exc:
+        log(f"bl auto-update fetch failed: {exc}", "debug")
+        return None
+
+
+def _cookie_headers():
+    cookie_str, sapisid = load_cookie()
+    headers = {}
+    if cookie_str:
+        headers["Cookie"] = cookie_str
+    if sapisid:
+        headers["Authorization"] = make_sapisidhash(sapisid)
+    return headers
+
+
+def update_bl_if_needed(force=False):
+    """Refresh ``gemini_bl`` from upstream. Returns True when it changed.
+
+    Rate-limited so a sustained outage cannot amplify into a scrape storm.
+    """
+    now = time.time()
+    with _bl_lock:
+        if not force and now - _bl_last_attempt[0] < _BL_REFRESH_COOLDOWN_SEC:
+            return False
+        _bl_last_attempt[0] = now
+    new_bl = fetch_latest_bl()
+    if new_bl and new_bl != CONFIG["gemini_bl"]:
+        log(f"bl auto-updated: {CONFIG['gemini_bl']} -> {new_bl}")
+        CONFIG["gemini_bl"] = new_bl
+        return True
+    return False
+
+
+def warm_up():
+    """Prime caches at startup: resolve ``bl`` and pre-read the cookie file.
+
+    Runs on a short timeout and never raises, so an unreachable network delays
+    startup by at most a second or two instead of blocking the banner.
+    """
+    if not CONFIG.get("auto_update_bl", True):
+        return CONFIG.get("gemini_bl")
+    if is_explicit("gemini_bl"):
+        log("Using gemini_bl from config (auto_update_bl skipped for pinned values)", "debug")
+        return CONFIG["gemini_bl"]
+    new_bl = fetch_latest_bl(timeout=8)
+    if new_bl:
+        if new_bl != CONFIG["gemini_bl"]:
+            log(f"bl auto-updated at startup: {CONFIG['gemini_bl']} -> {new_bl}")
+        CONFIG["gemini_bl"] = new_bl
+    else:
+        log("Could not refresh bl from upstream; using the pinned value. "
+            "Set auto_update_bl=false to silence this.", "warning")
+    # Touch the cookie once so the first request is not paying for file IO.
+    load_cookie()
+    return CONFIG["gemini_bl"]
+
+
+# ─── Response parsing ────────────────────────────────────────────────────────
+
+# Internal code-execution artifacts and card placeholders that must never reach
+# a client.
+_ARTIFACT_PATTERNS = [
+    re.compile(r"```(?:python|javascript|text)\?code_(?:reference|stdout)&code_event_index=\d+\n.*?```\n?",
+               re.DOTALL),
+    re.compile(r"http://googleusercontent\.com/card_content/\d+\n?"),
+]
+
+_BARD_ERROR = re.compile(r"BardErrorInfo\s*\[(\d+)\]")
+
+
+def clean_text(text, strip=True):
+    """Remove internal code-execution artifacts from model output."""
+    if not text:
+        return ""
+    for pattern in _ARTIFACT_PATTERNS:
+        text = pattern.sub("", text)
     return text.strip() if strip else text
 
 
-def _extract_texts_from_line(line: str) -> list:
-    """Parse a single wrb.fr line and return list of text strings found."""
-    if '"wrb.fr"' not in line or len(line) < 200:
+def _extract_texts_from_line(line):
+    """Parse one ``wrb.fr`` frame and return the text segments it carries.
+
+    Frames are selected structurally. The previous implementation also required
+    ``len(line) >= 200`` and ``len(inner_str) >= 50``, which silently discarded
+    short frames and surfaced to users as ``content: null``.
+    """
+    if '"wrb.fr"' not in line:
         return []
     try:
         arr = json.loads(line)
-        inner_str = arr[0][2]
-        if not inner_str or len(inner_str) < 50:
+        frame = arr[0]
+        if not isinstance(frame, list) or len(frame) < 3:
+            return []
+        inner_str = frame[2]
+        if not isinstance(inner_str, str) or not inner_str:
             return []
         inner = json.loads(inner_str)
-        if not (isinstance(inner, list) and len(inner) > 4 and inner[4]):
-            return []
-        texts = []
-        for part in inner[4]:
-            if isinstance(part, list) and len(part) > 1 and part[1] and isinstance(part[1], list):
-                for t in part[1]:
-                    if isinstance(t, str) and t:
-                        texts.append(t)
-        return texts
-    except (json.JSONDecodeError, IndexError, TypeError):
+    except (json.JSONDecodeError, IndexError, TypeError, ValueError):
         return []
+    if not (isinstance(inner, list) and len(inner) > 4 and inner[4]):
+        return []
+    texts = []
+    for part in inner[4]:
+        if isinstance(part, list) and len(part) > 1 and isinstance(part[1], list):
+            for item in part[1]:
+                if isinstance(item, str) and item:
+                    texts.append(item)
+    return texts
 
 
-def extract_response_text(raw: str) -> str:
-    """Parse full response to get final text."""
-    bard_err = re.search(r'BardErrorInfo\s*\[(\d+)\]', raw)
-    if bard_err:
-        raise RuntimeError(f"Gemini upstream rejected request: BardErrorInfo [{bard_err.group(1)}]")
-    last_text = ""
+def extract_response_text(raw):
+    """Parse a complete StreamGenerate response and return the final text.
+
+    Gemini streams cumulatively: each frame repeats the answer so far, so the
+    last frame holds the complete text. Earlier code took the *longest* segment
+    across all frames, which disagrees with the last-frame rule whenever a
+    response contains an earlier long segment (a preamble, or a separate part).
+    Taking the last non-empty frame matches both the wire semantics and the
+    behaviour the streaming path already relies on.
+    """
+    if not raw:
+        return ""
+    match = _BARD_ERROR.search(raw)
+    if match:
+        raise GeminiUpstreamError(
+            f"Gemini upstream rejected request: BardErrorInfo [{match.group(1)}]",
+            code=int(match.group(1)),
+        )
+
+    result = ""
+    longest = ""
     for line in raw.split("\n"):
-        for t in _extract_texts_from_line(line):
-            if len(t) > len(last_text):
-                last_text = t
-    return clean_text(last_text)
+        for text in _extract_texts_from_line(line):
+            if text.strip():
+                result = text
+            if len(text) > len(longest):
+                longest = text
+    # Fall back to the longest segment if no frame carried usable text.
+    return clean_text(result or longest)
 
 
-def generate(prompt: str, model_id: int, think_mode: int, file_refs: list = None, extra_fields: dict = None) -> str:
-    """Non-streaming generation with retry."""
-    body = _build_payload(prompt, model_id, think_mode, file_refs, extra_fields).encode()
-    url = _get_url()
-    headers = _build_headers()
-    ctx = _get_ssl_ctx()
+# ─── Transports ──────────────────────────────────────────────────────────────
+
+def _urlopen(req, timeout=None):
+    """urllib request honouring the configured proxy and shared SSL context."""
+    timeout = timeout or CONFIG.get("request_timeout_sec", 180)
     proxy = CONFIG.get("proxy")
+    ctx = _get_ssl_ctx()
+    if proxy:
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": proxy, "https": proxy}),
+            urllib.request.HTTPSHandler(context=ctx),
+        )
+        return opener.open(req, timeout=timeout)
+    return urllib.request.urlopen(req, context=ctx, timeout=timeout)
 
+
+def _describe_http_error(exc):
+    """Turn an HTTP error into a message that includes upstream detail."""
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    body = ""
+    try:
+        response = getattr(exc, "response", None)
+        if response is not None:
+            # httpx: .text is available once the body has been read.
+            body = getattr(response, "text", "") or ""
+            if not body and hasattr(response, "read"):
+                body = (response.read() or b"").decode("utf-8", errors="replace")
+        elif hasattr(exc, "read"):
+            # urllib.error.HTTPError
+            body = (exc.read() or b"").decode("utf-8", errors="replace")
+    except Exception:
+        body = ""
+    body = body.strip()[:300]
+    return (f"HTTP {status} — {body}" if body else f"HTTP {status}"), status
+
+
+# httpx raises HTTPStatusError; urllib raises HTTPError. Collect whichever exist
+# so the retry logic below stays readable and works without httpx installed.
+_HTTP_ERRORS = [urllib.error.HTTPError]
+if HAS_HTTPX:
+    _HTTP_ERRORS.append(httpx.HTTPStatusError)
+_HTTP_ERRORS = tuple(_HTTP_ERRORS)
+
+
+def generate(prompt, model_id, think_mode, file_refs=None, extra_fields=None):
+    """Non-streaming generation with retry. Returns the final text."""
+    body = _build_payload(prompt, model_id, think_mode, file_refs, extra_fields).encode()
+    headers = _build_headers()
+    attempts = max(1, int(CONFIG.get("retry_attempts", 3)))
+    delay = CONFIG.get("retry_delay_sec", 2)
     last_err = None
-    for attempt in range(CONFIG["retry_attempts"]):
+
+    for attempt in range(attempts):
+        url = _get_url()
         try:
+            client = _get_httpx_client()
+            if client is not None:
+                resp = client.post(url, content=body, headers=headers)
+                if resp.status_code == 405 and update_bl_if_needed():
+                    log("Retrying with refreshed bl…")
+                    last_err = GeminiUpstreamError("HTTP 405 from upstream", status=405)
+                    continue
+                resp.raise_for_status()
+                return extract_response_text(resp.text)
             req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-            if proxy:
-                opener = urllib.request.build_opener(
-                    urllib.request.ProxyHandler({"http": proxy, "https": proxy}),
-                    urllib.request.HTTPSHandler(context=ctx)
-                )
-                resp = opener.open(req, timeout=CONFIG["request_timeout_sec"])
-            else:
-                resp = urllib.request.urlopen(req, context=ctx, timeout=CONFIG["request_timeout_sec"])
-            raw = resp.read().decode("utf-8", errors="replace")
+            raw = _urlopen(req).read().decode("utf-8", errors="replace")
             return extract_response_text(raw)
-        except Exception as e:
-            last_err = e
-            if attempt < CONFIG["retry_attempts"] - 1:
-                log(f"Retry {attempt+1}/{CONFIG['retry_attempts']}: {e}")
-                time.sleep(CONFIG["retry_delay_sec"])
+        except _HTTP_ERRORS as exc:
+            message, status = _describe_http_error(exc)
+            last_err = GeminiUpstreamError(message, status=status)
+            if status == 405 and update_bl_if_needed():
+                log("Retrying with refreshed bl…")
+                continue
+        except Exception as exc:
+            last_err = exc
+        if attempt < attempts - 1:
+            log(f"Retry {attempt + 1}/{attempts}: {last_err}", "warning")
+            time.sleep(delay)
+
+    if last_err is None:  # pragma: no cover - defensive
+        last_err = RuntimeError("generation failed")
     raise last_err
 
 
-def generate_stream(prompt: str, model_id: int, think_mode: int, file_refs: list = None, extra_fields: dict = None):
-    """Streaming generation via httpx with retry on connection failure."""
+def _iter_stream_frames(resp):
+    """Yield text segments from a streaming response, frame by frame."""
+    buf = ""
+    for chunk in resp.iter_text():
+        buf += chunk
+        if "BardErrorInfo" in buf:
+            match = _BARD_ERROR.search(buf)
+            if match:
+                raise GeminiUpstreamError(
+                    f"Gemini upstream rejected request: BardErrorInfo [{match.group(1)}]",
+                    code=int(match.group(1)),
+                )
+        while "\n" in buf:
+            line, buf = buf.split("\n", 1)
+            for text in _extract_texts_from_line(line):
+                yield text
+    for text in _extract_texts_from_line(buf):
+        yield text
+
+
+def generate_stream(prompt, model_id, think_mode, file_refs=None, extra_fields=None):
+    """Yield incremental text deltas.
+
+    Without ``httpx`` this falls back to a buffered request and yields the whole
+    answer once. Deltas are cumulative-safe: a frame that repeats or extends
+    what was already emitted produces only the new suffix, and a frame that
+    belongs to a *different* part is emitted in full rather than treated as a
+    corruption (the old code raised "stream content changed during retry" here,
+    which killed the response after the client had already received 200 OK).
+    """
     if not HAS_HTTPX:
         text = generate(prompt, model_id, think_mode, file_refs, extra_fields)
         if text:
@@ -241,40 +713,66 @@ def generate_stream(prompt: str, model_id: int, think_mode: int, file_refs: list
         return
 
     body = _build_payload(prompt, model_id, think_mode, file_refs, extra_fields)
-    url = _get_url()
-    headers = _build_headers()
     client = _get_httpx_client()
+    attempts = max(1, int(CONFIG.get("retry_attempts", 3)))
+    delay = CONFIG.get("retry_delay_sec", 2)
 
+    emitted = ""       # text already handed to the caller
+    seen_longest = ""  # longest cumulative frame observed
     last_err = None
-    emitted_raw_text = ""
-    for attempt in range(CONFIG["retry_attempts"]):
+
+    for attempt in range(attempts):
+        headers = _build_headers()
+        url = _get_url()
         try:
             with client.stream("POST", url, content=body, headers=headers) as resp:
+                if resp.status_code == 405:
+                    resp.read()
+                    if update_bl_if_needed():
+                        log("Retrying stream with refreshed bl…")
+                        last_err = GeminiUpstreamError("HTTP 405 from upstream", status=405)
+                        continue
                 resp.raise_for_status()
-                buf = ""
-                for chunk in resp.iter_text():
-                    buf += chunk
-                    if "BardErrorInfo" in buf:
-                        bard_err = re.search(r'BardErrorInfo\s*\[(\d+)\]', buf)
-                        if bard_err:
-                            raise RuntimeError(
-                                f"Gemini upstream rejected request: BardErrorInfo [{bard_err.group(1)}]"
-                            )
-                    while "\n" in buf:
-                        line, buf = buf.split("\n", 1)
-                        for t in _extract_texts_from_line(line):
-                            if t == emitted_raw_text or emitted_raw_text.startswith(t):
-                                continue
-                            if not t.startswith(emitted_raw_text):
-                                raise RuntimeError("Gemini stream content changed during retry")
-                            delta = clean_text(t[len(emitted_raw_text):], strip=False)
-                            emitted_raw_text = t
-                            if delta:
-                                yield delta
-            return
-        except Exception as e:
-            last_err = e
-            if attempt < CONFIG["retry_attempts"] - 1:
-                log(f"Stream retry {attempt+1}/{CONFIG['retry_attempts']}: {e}")
-                time.sleep(CONFIG["retry_delay_sec"])
+                for text in _iter_stream_frames(resp):
+                    if not text:
+                        continue
+                    if text == emitted or emitted.startswith(text):
+                        # A repeat or a stale/partial frame: already delivered.
+                        continue
+                    if text.startswith(emitted):
+                        # Normal cumulative growth — emit only the new suffix.
+                        suffix = text[len(emitted):]
+                        emitted = text
+                        delta = clean_text(suffix, strip=False)
+                    else:
+                        # A separate part of the answer (multi-part response),
+                        # or a fresh sequence after a retry. Emit it in full
+                        # instead of aborting the stream.
+                        emitted = text
+                        delta = clean_text(text, strip=False)
+                    if len(text) > len(seen_longest):
+                        seen_longest = text
+                    if delta:
+                        yield delta
+                return
+        except Exception as exc:
+            if isinstance(exc, _HTTP_ERRORS):
+                message, status = _describe_http_error(exc)
+                last_err = GeminiUpstreamError(message, status=status)
+                if status == 405 and update_bl_if_needed():
+                    continue
+            else:
+                last_err = exc
+            if emitted:
+                # Bytes already went to the client; retrying would duplicate
+                # them. Surface the failure so the handler can terminate the
+                # stream cleanly instead of silently truncating it.
+                log(f"Stream failed after {len(emitted)} chars: {last_err}", "error")
+                raise last_err from None
+            if attempt < attempts - 1:
+                log(f"Stream retry {attempt + 1}/{attempts}: {last_err}", "warning")
+                time.sleep(delay)
+
+    if last_err is None:  # pragma: no cover - defensive
+        last_err = RuntimeError("streaming generation failed")
     raise last_err

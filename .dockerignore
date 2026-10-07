@@ -1,9 +1,40 @@
+# Version control and editor state
 .git
+.gitignore
 .idea
-.venv
+.vscode
+.DS_Store
+
+# Build artefacts — the image must contain only source
 __pycache__
-*.pyc
+*.py[cod]
+*.egg-info
+build
+dist
+.eggs
+.venv
+venv
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Secrets and local configuration must never be baked into an image.
+# Mount them at runtime instead (see docs/DEPLOYMENT.md).
 config.json
 cookie.txt
 cookie.json
+gemini-auth.json
 .env
+
+# Not needed at runtime
+tests
+docs
+cloudflare
+gemini-cookie-sync-extension
+docker-compose*.yml
+Dockerfile
+*.md
+logo.png
+LICENSE
+.github

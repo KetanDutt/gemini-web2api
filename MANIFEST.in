@@ -1,0 +1,21 @@
+# What belongs in the source distribution beyond the package itself.
+# Kept deliberately small: docs, tests and the Cloudflare port are useful to a
+# reader of the sdist but must not be installed as package data.
+include README.md
+include README_CN.md
+include LICENSE
+include requirements.txt
+include config.example.json
+recursive-include docs *.md
+recursive-include tests *.py
+recursive-include cloudflare *.js *.MD *.md
+recursive-include gemini-cookie-sync-extension *.js *.json *.md *.html
+
+# Local secrets must never end up in a distribution.
+exclude config.json
+exclude cookie.txt
+exclude cookie.json
+exclude gemini-auth.json
+exclude .env
+global-exclude __pycache__
+global-exclude *.py[cod]

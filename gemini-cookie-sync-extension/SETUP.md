@@ -1,16 +1,19 @@
 # Gemini Cookie Sync Setup
 
-Short guide for extracting fresh Gemini auth data and applying it to `gemini-web2api`.
+Extract a fresh Gemini session from your browser and apply it to
+`gemini-web2api`.
 
 ## What this extension exports
 
-The extension reads the current signed-in Gemini session and exports:
+It reads the current signed-in Gemini session and exports:
 
-- Google session cookies
-- `SAPISID`
-- `SNlM0e` (`xsrf_token`)
-- `cfb2h` (`gemini_bl`)
-- `auth_user`
+| Field | Config key it fills | Why it matters |
+|---|---|---|
+| Google session cookies | `cookie` | Authentication itself |
+| `SAPISID` | `sapisid` | Builds the `SAPISIDHASH` authorization header |
+| `SNlM0e` | `xsrf_token` | The `at` form field on every request |
+| `cfb2h` | `gemini_bl` | The frontend build tag |
+| account index | `auth_user` | The `/u/<n>/` path prefix |
 
 It saves them locally as `gemini-auth.json`.
 
@@ -20,7 +23,7 @@ It saves them locally as `gemini-auth.json`.
 2. Enable **Developer mode**
 3. Click **Load unpacked**
 4. Select the `gemini-cookie-sync-extension` folder
-5. Open [https://gemini.google.com/app](https://gemini.google.com/app)
+5. Open <https://gemini.google.com/app>
 6. Sign in and refresh the page
 7. Open the extension and click **Inspect session**
 8. Confirm the session looks ready
@@ -34,75 +37,118 @@ gemini_bl / cfb2h: present
 Session and XSRF are ready for export.
 ```
 
-## Apply it in `gemini-web2api`
+## Apply it
 
 Move the exported file into the project:
 
 ```bash
 cd /path/to/gemini-web2api
-
-WIN_HOME=$(wslpath "$(powershell.exe -NoProfile -Command '[Environment]::GetFolderPath(\"UserProfile\")' | tr -d '\r')")
-cp "$WIN_HOME/Downloads/gemini-auth.json" ./gemini-auth.json
+cp ~/Downloads/gemini-auth.json ./gemini-auth.json
 chmod 600 gemini-auth.json
 ```
 
-Update `config.json`:
+Then point the server at it — that is the whole setup:
 
 ```bash
-cd /path/to/gemini-web2api
-
-AUTH_FILE="$(pwd)/gemini-auth.json"
-tmp=$(mktemp)
-
-jq \
-  --arg auth_file "$AUTH_FILE" \
-  --slurpfile auth "$AUTH_FILE" \
-  '
-    .cookie_file = $auth_file
-    | .auth_user = $auth[0].auth_user
-    | .xsrf_token = $auth[0].xsrf_token
-    | if (($auth[0].gemini_bl // "") | length) > 0
-      then .gemini_bl = $auth[0].gemini_bl
-      else .
-      end
-  ' config.json > "$tmp" &&
-mv "$tmp" config.json
-
-chmod 600 config.json
+python -m gemini_web2api --cookie-file "$(pwd)/gemini-auth.json"
 ```
 
-Quick check:
+or in `config.json`:
 
-```bash
-jq '{
-  cookie_file,
-  auth_user,
-  xsrf_token_set: ((.xsrf_token // "") | length > 0),
-  gemini_bl_set: ((.gemini_bl // "") | length > 0)
-}' config.json
+```json
+{"cookie_file": "/path/to/gemini-web2api/gemini-auth.json"}
 ```
 
-## Restart and test
+or in the environment:
 
 ```bash
-systemctl --user restart gemini-proxy
+export GEMINI_WEB2API_COOKIE_FILE=/path/to/gemini-auth.json
 ```
 
+### No further steps
+
+`cookie`, `sapisid`, `auth_user`, `xsrf_token` and `gemini_bl` are all read from
+the file automatically.
+
+> This guide used to prescribe a `jq` pipeline that copied `auth_user`,
+> `xsrf_token` and `gemini_bl` out of the export and into `config.json` by hand.
+> Since 1.2.0 that is unnecessary — the server adopts those fields when it loads
+> the cookie file. Anything you set explicitly in `config.json` or the
+> environment still wins, so the pipeline still works if you prefer it.
+
+### In Docker
+
+Mount it read-only rather than baking it into an image:
+
 ```bash
-curl -sS http://127.0.0.1:10012/v1/chat/completions \
+docker run -d --name gemini-web2api -p 8081:8081 \
+  -v ./gemini-auth.json:/data/gemini-auth.json:ro \
+  -e GEMINI_WEB2API_COOKIE_FILE=/data/gemini-auth.json \
+  -e GEMINI_WEB2API_API_KEYS="sk-your-key" \
+  gemini-web2api
+```
+
+With Compose, uncomment the `volumes:` block in `docker-compose.yml`.
+
+### Rotating the session
+
+The file is cached by `(path, mtime, size)` and re-read when it changes, so
+re-exporting and overwriting `gemini-auth.json` refreshes the session **without a
+restart**.
+
+## Verify
+
+```bash
+curl -s http://localhost:8081/health | python3 -m json.tool
+```
+
+`cookie_configured` should be `true`. Then confirm the session is actually being
+used:
+
+```bash
+curl -sS http://localhost:8081/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $API_KEY" \
-  -d '{
-    "model": "gemini-3.1-pro",
-    "messages": [
-      {
-        "role": "user",
-        "content": "Reply exactly with: authenticated-ok"
-      }
-    ]
-  }' | jq
+  -H "Authorization: Bearer sk-your-key" \
+  -d '{"model":"gemini-3.1-pro","messages":[{"role":"user","content":"Reply exactly with: authenticated-ok"}]}' \
+  | python3 -m json.tool
 ```
+
+Look for a startup log line like:
+
+```
+INFO  Cookie loaded: xsrf_token from auth file, bl from auth file
+```
+
+That confirms the XSRF token and build tag were adopted.
+
+### Did Pro actually route to Pro?
+
+Authenticating is not the same as being entitled. `gemini-3.1-pro` sets a UI mode
+preference that Google honours only for Gemini Advanced accounts, and it declines
+silently otherwise. Test with a prompt that separates Pro from Flash rather than
+trusting the model name. See
+[docs/TROUBLESHOOTING.md](../docs/TROUBLESHOOTING.md#pro-does-not-behave-like-pro).
+
+## If it does not work
+
+| Symptom | Cause |
+|---|---|
+| `Cookie file not found` in the log | Wrong path, or the Docker mount is missing |
+| `Cookie loaded but SAPISID is absent` | Incomplete export — re-export after a fresh page load |
+| `cookie_configured: false` in `/health` | `cookie_file` was never set |
+| HTTP 400 mentioning `xsrf` | Token stale — refresh Gemini Web and re-export |
+| Still behaves like Flash | No Gemini Advanced entitlement, or expired session |
+
+More in [docs/AUTHENTICATION.md](../docs/AUTHENTICATION.md) and
+[docs/TROUBLESHOOTING.md](../docs/TROUBLESHOOTING.md).
 
 ## Keep it secret
 
-`gemini-auth.json` contains a real Google session. Do not share it, print it, or commit it to Git.
+`gemini-auth.json` is a real Google session — it grants access to the whole
+account, not just Gemini.
+
+- `chmod 600` it
+- It is gitignored; never force-add it
+- Never paste it into an issue, a log, or a chat message
+- Prefer a read-only file mount over an environment variable: `docker inspect`
+  and `/proc/<pid>/environ` expose environment contents to anyone with host access

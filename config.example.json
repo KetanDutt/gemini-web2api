@@ -1,18 +1,28 @@
 {
   "port": 8081,
   "host": "0.0.0.0",
+  "api_keys": [],
+  "default_model": "gemini-3.6-flash",
+
+  "cookie_file": null,
+  "auth_user": null,
+  "xsrf_token": null,
+  "gemini_bl": "boq_assistant-bard-web-server_20260716.08_p0",
+  "auto_update_bl": true,
+  "temporary_chats": false,
+
+  "proxy": null,
   "retry_attempts": 3,
   "retry_delay_sec": 2,
   "request_timeout_sec": 180,
-  "gemini_bl": "boq_assistant-bard-web-server_20260716.08_p0",
-  "auth_user": null,
-  "xsrf_token": null,
-  "default_model": "gemini-3.6-flash",
-  "api_keys": [
-    "sk-gemini"
-  ],
-  "cookie_file": null,
-  "proxy": null,
+
   "log_requests": true,
-  "temporary_chats": false
+  "strict_models": false,
+  "block_private_image_urls": true,
+  "max_request_bytes": 26214400,
+  "max_image_bytes": 20971520,
+  "rate_limit_max": 0,
+  "rate_limit_window_sec": 60,
+  "cors_origin": "*",
+  "shutdown_timeout_sec": 5
 }

@@ -1,13 +1,16 @@
-# Host-networking variant.
+# Standard bridge-network deployment.
+#
+#   docker compose up -d
+#
+# Configuration comes from the environment below, so this works without a
+# config.json. To use a file instead, uncomment the volumes entry and run
+# `cp config.example.json config.json` first — otherwise Docker creates a
+# *directory* named config.json and the container fails to read it.
+#
+# If Gemini rejects requests from Docker's NAT range (empty replies, 403/429),
+# use the host-networking variant instead:
 #
 #   docker compose -f docker-compose.local.yml up -d
-#
-# Use this when Gemini returns empty replies or 403/429 from the default bridge
-# network: Google rejects some Docker NAT IP ranges. Host networking makes the
-# container present the machine's own address instead.
-#
-# `ports:` is ignored in host mode — the container listens directly on
-# GEMINI_WEB2API_PORT on the host.
 
 services:
   gemini-web2api:
@@ -15,16 +18,20 @@ services:
     image: gemini-web2api:local
     container_name: gemini-web2api
     restart: unless-stopped
-    network_mode: host
+    ports:
+      - "${GEMINI_WEB2API_PORT:-8081}:8081"
     environment:
-      GEMINI_WEB2API_PORT: "${GEMINI_WEB2API_PORT:-8081}"
+      GEMINI_WEB2API_PORT: "8081"
       GEMINI_WEB2API_HOST: "0.0.0.0"
+      # Comma-separated list. Empty means authentication is DISABLED.
       GEMINI_WEB2API_API_KEYS: "${GEMINI_WEB2API_API_KEYS:-}"
       GEMINI_WEB2API_DEFAULT_MODEL: "${GEMINI_WEB2API_DEFAULT_MODEL:-gemini-3.6-flash}"
       GEMINI_WEB2API_LOG_REQUESTS: "${GEMINI_WEB2API_LOG_REQUESTS:-true}"
       GEMINI_WEB2API_TEMPORARY_CHATS: "${GEMINI_WEB2API_TEMPORARY_CHATS:-false}"
+      # Set to enable authenticated Pro routing; mount the file below too.
       GEMINI_WEB2API_COOKIE_FILE: "${GEMINI_WEB2API_COOKIE_FILE:-}"
       GEMINI_WEB2API_PROXY: "${GEMINI_WEB2API_PROXY:-}"
+      # 0 disables the limiter.
       GEMINI_WEB2API_RATE_LIMIT_MAX: "${GEMINI_WEB2API_RATE_LIMIT_MAX:-0}"
     # volumes:
     #   - ./config.json:/app/config.json:ro
@@ -42,3 +49,6 @@ services:
         max-file: "3"
     security_opt:
       - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp

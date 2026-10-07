@@ -1,18 +1,77 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "gemini-web2api"
-version = "1.1.0"
-description = "Convert Google Gemini web into OpenAI-compatible API"
+version = "1.2.0"
+description = "Serve Google Gemini Web as an OpenAI-compatible API"
 readme = "README.md"
-license = {text = "MIT"}
 requires-python = ">=3.8"
+# Deliberately the TOML-table form, not PEP 639's `license = "MIT"` string.
+# The string form needs setuptools>=77, but Python 3.8 — still supported here —
+# resolves setuptools ~75.8, which rejects it. The table form emits a
+# deprecation warning (deadline 2027-02) instead of breaking `pip install .` on
+# 3.8. Switch to the SPDX string when 3.8 support is dropped.
+license = { text = "MIT" }
+keywords = ["gemini", "openai", "proxy", "api", "llm"]
+authors = [{ name = "KetanDutt" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+]
+# The core server runs on the standard library alone.
 dependencies = []
 
 [project.optional-dependencies]
+# Real incremental streaming plus connection pooling/keep-alive upstream.
 streaming = ["httpx>=0.25"]
+dev = ["httpx>=0.25", "pytest>=7", "ruff>=0.5"]
+
+[project.urls]
+Homepage = "https://github.com/KetanDutt/gemini-web2api"
+Repository = "https://github.com/KetanDutt/gemini-web2api"
+Issues = "https://github.com/KetanDutt/gemini-web2api/issues"
+Changelog = "https://github.com/KetanDutt/gemini-web2api/blob/main/docs/CHANGELOG.md"
 
 [project.scripts]
 gemini-web2api = "gemini_web2api.__main__:main"
 
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+# Explicit discovery: the repository root also holds `cloudflare/` and a
+# `gemini_web2api.py` shim, and setuptools' flat-layout auto-discovery refuses
+# to guess between them, which made every build fail.
+[tool.setuptools]
+packages = ["gemini_web2api"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py38"
+extend-exclude = ["cloudflare"]
+
+[tool.ruff.lint]
+# E/F: pycodestyle errors + pyflakes. I: import order. UP: pyupgrade.
+# B: bugbear (mutable defaults, bare except, ...). SIM: simplification.
+select = ["E", "F", "I", "B", "SIM", "UP"]
+ignore = [
+    "E501",   # line length is handled by the formatter
+    "SIM108", # ternaries are not always clearer than if/else
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]

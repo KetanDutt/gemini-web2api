@@ -1,0 +1,288 @@
+# Changelog
+
+All notable changes to this project. Format follows
+[Keep a Changelog](https://keepachangelog.com/); the project uses semantic
+versioning.
+
+The 1.2.0 entries reference [AUDIT.md](AUDIT.md), which records how each defect
+was reproduced.
+
+---
+
+## [1.2.0]
+
+### Fixed
+
+**Blocking**
+
+- The package could not be built or installed at all. `pyproject.toml` relied on
+  setuptools flat-layout auto-discovery, which refuses to choose between
+  `cloudflare/` and `gemini_web2api/`. `pip install .` and any PyPI publish
+  failed, and the declared `gemini-web2api` console script was unreachable.
+  Package discovery is now explicit.
+
+- The repository shipped two divergent implementations of the same server: a
+  1108-line `gemini_web2api.py` and the `gemini_web2api/` package. They
+  disagreed on build-tag refresh, model support, `tool_choice`, streaming
+  semantics, and response parsing. Because a package outranks a module of the
+  same name, `import gemini_web2api` silently resolved to the package — which
+  is also what the Dockerfile copied, so the deployed artifact was the *less*
+  capable copy and could never recover from an HTTP 405 without a rebuild.
+  The package is now the single source of truth and every monolith-only
+  capability was ported into it.
+
+- `extract_response_text` returned the **longest** text segment instead of the
+  **last**. Since Gemini frames are cumulative these usually agree, but a
+  response containing an earlier long segment returned that segment instead of
+  the answer.
+
+- Response frames shorter than arbitrary thresholds (`len(line) < 200`,
+  `len(inner_str) < 50`) were discarded outright, silently producing
+  `content: null`. Frames are now selected structurally.
+
+- Streaming aborted mid-response with
+  `RuntimeError: Gemini stream content changed during retry` whenever Gemini
+  emitted a second, separate part. Because deltas had already been written, the
+  client was left with `200 OK`, a partial body and no `data: [DONE]`, so
+  OpenAI clients hung waiting for a terminator. Multi-part frames are now
+  emitted normally, and every streaming path always sends its terminator.
+
+- Cookie parsing split on the literal `"; "`, so `A=1;B=2`, newline-separated
+  cookies and cookie jars all lost `SAPISID`. That dropped the
+  `Authorization: SAPISIDHASH` header and silently downgraded Pro to Flash with
+  no error anywhere. Parsing is now separator-agnostic.
+
+- Query strings broke routing: `GET /v1/models?limit=100` returned 404 because
+  paths were compared exactly.
+
+- `GET /v1beta/models/{model}` returned the entire model list instead of one
+  model, because it fell through to the list handler.
+
+- `gemini-3.1-pro-enhanced` raised `IndexError`: it writes payload slot 80 and
+  the single-file implementation sized the payload at 80 slots.
+
+- Unfenced `function_call` output with nested arguments was truncated at the
+  first `}` by a non-greedy regex, so the JSON failed to parse and the call was
+  dropped. Extraction is now brace-balancing and string-aware.
+
+- `do_POST` answered `401` before reading the request body. Harmless under
+  HTTP/1.0, but it desynchronises a keep-alive connection once HTTP/1.1 is
+  enabled. The body is now always drained first.
+
+- On `KeyboardInterrupt` the server called `shutdown()` on an already-exited
+  `serve_forever` loop, leaving the listening socket open. Now a graceful drain
+  followed by `server_close()`.
+
+- A malformed `Content-Length` raised `ValueError` and produced a 500 instead of
+  a 400.
+
+- `resolve_model` ignored the configured `default_model` when falling back,
+  using a hardcoded name instead.
+
+- `@think=N` accepted out-of-range and non-integer values silently. Now validated
+  to 0–4 with a clear error.
+
+- `CONFIG = dict(DEFAULT_CONFIG)` shallow-copied, aliasing mutable defaults such
+  as `api_keys`; an in-place mutation would have corrupted `DEFAULT_CONFIG`.
+  Now a deep copy.
+
+- Startup called `fetch_latest_bl()` synchronously with a 15-second timeout, so
+  an unreachable network delayed the banner by 15 s. Now short-timeout,
+  non-fatal, and reported in the banner.
+
+### Added
+
+**Endpoints**
+
+- `GET /health`, `/healthz`, `/live` — always-public liveness probes reporting
+  version, uptime, request count, streaming backend and a `checks` object of
+  operational warnings.
+- `GET /ready` — readiness probe, 503 when `checks.fatal` is non-empty.
+- `GET /status` — live metrics plus a secret-redacted config view. Gated when
+  API keys are configured.
+- `GET /v1/models/{id}` and `GET /v1beta/models/{id}` — single-model retrieval.
+  `client.models.retrieve()` in the OpenAI SDK previously 404'd.
+- `POST /v1/completions` — the legacy text-completion API, in both streaming and
+  non-streaming form. Previously 404.
+- `POST /v1/embeddings`, `/v1/audio/speech`, `/v1/images/generations` now return
+  an explicit `501 not implemented` rather than a bare 404.
+- `HEAD` support, and `OPTIONS` now advertises the real method and header sets
+  with a preflight cache.
+- `stream_options.include_usage` on chat completions, emitting a final
+  `choices: []` chunk with usage as the OpenAI spec requires.
+- `X-Request-Id` on every response, echoed in logs, so a client-side error can be
+  tied to a server-side cause.
+
+**Dashboard**
+
+- A self-contained status dashboard at `GET /` for browsers: runtime state,
+  warnings, the model table with one-click copy, an endpoint reference, and a
+  playground that streams a real completion. Inlined CSS and JS with no external
+  requests, so it works air-gapped. `GET /` still returns JSON for programmatic
+  clients via content negotiation, and `/?format=json` forces it.
+
+**Configuration**
+
+- Environment variables for every option as `GEMINI_WEB2API_<KEY>`, with type
+  coercion. `api_keys` accepts a comma list, a pipe list or a JSON array.
+- `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` are honoured when `proxy` is unset.
+- A cookie file that is a `gemini-auth.json` export now applies `xsrf_token`,
+  `gemini_bl` and `auth_user` automatically — previously only `cookie` and
+  `sapisid` were read, so the bundled browser extension's output required a
+  manual `jq` pipeline. Values you set explicitly still win.
+- Netscape/curl cookie-jar files are parsed directly, including `#HttpOnly_`
+  records — Google's session cookies are HttpOnly, so a parser that skipped
+  comment lines discarded exactly the ones that matter.
+- Cookie arrays exported as JSON (`[{"name": …, "value": …}]`) are accepted.
+- New options: `auto_update_bl`, `strict_models`, `block_private_image_urls`,
+  `max_request_bytes`, `max_image_bytes`, `rate_limit_max`,
+  `rate_limit_window_sec`, `cors_origin`, `shutdown_timeout_sec`.
+- Unknown config keys now warn by name instead of being silently ignored, which
+  catches typos like `apikey`.
+- Invalid JSON, a non-object config, out-of-range ports and bad numbers warn and
+  fall back to defaults instead of crashing at startup.
+- New CLI flags: `--host`, `--api-key` (repeatable), `--default-model`,
+  `--gemini-bl`, `--log-level`, `--rate-limit`, `--rate-limit-window`, `--quiet`,
+  `--no-auto-bl`.
+
+**Security** — see [SECURITY.md](SECURITY.md)
+
+- SSRF protection on `image_url` fetching: only `http(s)`, DNS-resolved and
+  checked against private/loopback/link-local/reserved/multicast ranges,
+  IPv4-mapped IPv6 unwrapped, unresolvable hosts refused, credentials in URLs
+  rejected, and **every redirect hop re-validated** so a public URL cannot 302 to
+  the cloud metadata endpoint.
+- Response size caps: `max_image_bytes` (20 MiB) and `max_request_bytes`
+  (25 MiB), the latter enforced while accumulating a chunked body.
+- Constant-time API key comparison via `hmac.compare_digest`.
+- `WWW-Authenticate` on 401, and all errors now use OpenAI's
+  `{message, type, code, param}` shape so SDKs surface them properly.
+- Optional fixed-window rate limiting per key (or per IP), returning 429 with
+  `Retry-After`. Ported from the Cloudflare Workers implementation.
+- `GET /status` redacts secrets; no endpoint returns a cookie value.
+
+**Packaging and operations**
+
+- Docker image runs as an unprivileged user (uid 10001), no longer bakes
+  `config.example.json` in as `config.json` (which shipped the public key
+  `sk-gemini`), and has a built-in `HEALTHCHECK`.
+- `SIGTERM` is handled with a graceful drain, so `docker stop` and
+  `systemctl stop` no longer truncate active streams.
+- A canonical `docker-compose.yml` — the documented `docker compose up -d`
+  previously failed because only the non-default `docker-compose.local.yml`
+  existed. Both variants now have healthchecks, restart policy, log rotation and
+  `no-new-privileges`.
+- `python -m gemini_web2api._healthcheck`, a standalone probe needing no package
+  imports and no curl in the image.
+- `TCP_NODELAY` for streaming latency.
+- `.github/workflows/ci.yml`: the suite on Python 3.8/3.11/3.12/3.13, a
+  stdlib-only job, a build-and-install-the-wheel job, ruff, and a Docker build.
+
+### Changed
+
+**Performance**
+
+- One pooled `httpx.Client` process-wide instead of a new client per request, so
+  TLS sessions and TCP connections are reused. This applies to non-streaming
+  requests too, which previously paid a full handshake every time.
+- HTTP/1.1 with keep-alive, replacing HTTP/1.0's connection-per-request.
+- `X-Accel-Buffering: no` and `Cache-Control: no-transform` on SSE responses so
+  nginx does not buffer the stream.
+- Cookie file cached by `(path, mtime, size)`; one `stat()` per request warm.
+- Page tokens cached for 10 minutes.
+- Regexes compiled once at module scope.
+- Build-tag refresh rate-limited to once per minute so an outage cannot become a
+  scrape storm.
+
+**Behaviour**
+
+- An unknown model still falls back to the default (clients probe with `gpt-4`
+  during setup and a hard 400 breaks their connection test), but it is now
+  logged, and `strict_models: true` opts into the error.
+- An unfetchable or policy-refused image is a **400** `image_rejected`, not a 502
+  blaming the upstream.
+- Empty Google-native replies return a short placeholder instead of an empty
+  `parts[0].text`, which made Gemini CLI hang.
+- `clean_text` also strips `googleusercontent.com/card_content/` placeholders.
+- The User-Agent is a complete, current Chrome string rather than a truncated one.
+- Startup banner reports the dashboard and health URLs, the resolved build tag,
+  rate-limit state, and actionable warnings for missing httpx or missing API keys.
+- Upstream 429 is passed through as 429; a 405 explains that the build tag is
+  stale and names `gemini_bl`.
+
+### Removed
+
+- `gemini_web2api.py`'s 1108-line duplicate implementation. The file remains as a
+  ~60-line compatibility shim so `python gemini_web2api.py` keeps working; it now
+  exits with a clear actionable message if the package is absent. The README's
+  "single file" claim was already false — the monolith imported
+  `gemini_web2api.multimodal`, so copying it elsewhere broke image requests with
+  `ModuleNotFoundError: 'gemini_web2api' is not a package`.
+- Dead code: `server._usage()` was defined but never called while four call sites
+  inlined the calculation inconsistently — it is now the single implementation.
+  `tools._compress_b64_if_needed()` and `MAX_IMAGE_B64_SIZE` were never called;
+  they were vestigial from a design that embedded images as base64 text, and
+  carried an unused Pillow dependency plus a silent `b64[:50000]` truncation path.
+- The arbitrary length gates in `_extract_texts_from_line`.
+- `tests/test_modular_sync.py`, whose purpose was comparing the two divergent
+  copies. Its cases were folded into `test_protocol.py`, `test_tools.py` and
+  `test_endpoints.py`.
+
+### Documentation
+
+- New `docs/` folder: [README](README.md) (index),
+  [ARCHITECTURE](ARCHITECTURE.md), [CONFIGURATION](CONFIGURATION.md),
+  [API](API.md), [AUTHENTICATION](AUTHENTICATION.md),
+  [DEPLOYMENT](DEPLOYMENT.md), [SECURITY](SECURITY.md),
+  [TROUBLESHOOTING](TROUBLESHOOTING.md), [DEVELOPMENT](DEVELOPMENT.md),
+  [CHANGELOG](CHANGELOG.md) and [AUDIT](AUDIT.md).
+- README rewritten: correct model table (it was missing `gemini-3.7-flash` and
+  `gemini-3.1-pro-enhanced`), the "single file" claim removed, every config key
+  documented, and links into `docs/`.
+- `gemini-cookie-sync-extension/SETUP.md` simplified — the `jq` pipeline it
+  prescribed is no longer needed.
+- `config.example.json` now lists every option.
+
+### Tests
+
+- 18 tests → **358**, all offline. The Gemini wire protocol is faked at the frame
+  level so real parsing and real HTTP handling are exercised without a network.
+- New modules for config layering, cookie formats, model resolution, protocol
+  framing and streaming, prompt/tool parsing, every HTTP route, security
+  behaviour, and packaging/structure.
+- Regression tests guard each fixed defect, plus structural invariants: the shim
+  stays a shim, `config.example.json` matches `DEFAULT_CONFIG`, every model
+  appears in the README, the README documents no nonexistent model, versions
+  agree, and no secret file is tracked by git.
+
+---
+
+## [1.1.0]
+
+- Modular `gemini_web2api/` package alongside the single-file implementation.
+- `temporary_chats` support via payload slots 41 and 45.
+- Responses API streaming with the full Codex CLI event sequence and
+  `sequence_number`.
+- True SSE streaming for the Google-native `streamGenerateContent` endpoint.
+- `tool_choice` support (`none`, `auto`, `required`, named function).
+- Google-native `functionCall` parsing and `functionCallingConfig` handling.
+- `gemini-3.1-pro-enhanced` with experimental output-shaping fields.
+- Image MIME sniffing from file signatures.
+- Cookie file caching by mtime.
+- Chunked request-body support.
+- Test suite covering payload persistence flags and the streaming endpoints.
+
+## [1.0.0]
+
+- Initial release: single-file Gemini Web to OpenAI API proxy.
+- `/v1/chat/completions`, `/v1/models`, `/v1/responses`.
+- Google-native `/v1beta` endpoints for Gemini CLI.
+- Prompt-based tool calling.
+- Optional API keys, cookie authentication, SAPISIDHASH, `auth_user` and XSRF.
+- Multimodal image input via Scotty resumable upload.
+- SSE streaming with `httpx` and a `urllib` fallback.
+- Proxy support, retries, Docker packaging.
+
+[1.2.0]: https://github.com/KetanDutt/gemini-web2api/releases/tag/v1.2.0
+[1.1.0]: https://github.com/KetanDutt/gemini-web2api/releases/tag/v1.1.0
+[1.0.0]: https://github.com/KetanDutt/gemini-web2api/releases/tag/v1.0.0

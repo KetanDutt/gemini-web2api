@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The project claims >=3.8, so the floor is tested explicitly.
+        python-version: ["3.8", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install httpx
+
+      - name: Run the test suite
+        run: python -m unittest discover -s tests -t . -v
+
+  test-without-httpx:
+    name: stdlib-only fallback
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify the server imports and serves with no third-party packages
+        run: |
+          python -c "import gemini_web2api.gemini as g; assert not g.HAS_HTTPX, 'httpx should be absent'"
+          python -m unittest discover -s tests -t . -v
+
+  package:
+    name: build & install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build
+
+      # Regression guard: flat-layout auto-discovery used to fail outright on
+      # `cloudflare/` + `gemini_web2api/`, so the package could not be built.
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Install the wheel into a clean venv
+        run: |
+          python -m venv /tmp/wheelenv
+          /tmp/wheelenv/bin/pip install dist/*.whl httpx
+
+      - name: Verify the console script
+        run: |
+          /tmp/wheelenv/bin/gemini-web2api --version
+          /tmp/wheelenv/bin/gemini-web2api --help
+
+      - name: Verify the compatibility shim
+        run: python gemini_web2api.py --version
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip "ruff>=0.5"
+      - name: ruff
+        run: ruff check gemini_web2api tests
+      - name: compile check
+        run: python -m compileall -q gemini_web2api tests
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: gemini-web2api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
