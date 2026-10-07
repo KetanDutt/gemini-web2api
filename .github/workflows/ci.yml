@@ -49,6 +49,21 @@ jobs:
           echo "--- skipped tests ---"
           grep -E '\.\.\. skipped' /tmp/out.txt || echo "  (none)"
           skips=$(grep -cE '\.\.\. skipped' /tmp/out.txt || true)
+          echo "--- failing tests ---"
+          # Also emitted as annotations. Job logs live on storage the API
+          # cannot always reach, but annotations are readable from
+          # `check-runs/<id>/annotations` regardless — which is the only
+          # reason this step's skip audit was diagnosable at all. A failure
+          # that can only be read from a log nobody can fetch costs a round
+          # trip through a local reproduction just to identify.
+          grep -E '^(FAIL|ERROR): ' /tmp/out.txt > /tmp/failures.txt || true
+          grep -E '^(AssertionError|[A-Za-z.]*Error: |[A-Za-z.]*Exception)' /tmp/out.txt > /tmp/reasons.txt || true
+          while IFS= read -r line; do
+            echo "::error title=failing-test::${line}"
+          done < /tmp/failures.txt
+          while IFS= read -r line; do
+            echo "::error title=reason::${line}"
+          done < /tmp/reasons.txt
           # Annotations are readable from the API even when job logs are not,
           # so a silently-skipping guard cannot hide behind a green checkmark.
           echo "::notice title=test-suite::exit=${rc} skipped=${skips} node=$(command -v node >/dev/null 2>&1 && node --version || echo MISSING)"
