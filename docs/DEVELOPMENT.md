@@ -211,7 +211,20 @@ python -m build --sdist && mkdir -p /tmp/sdx \
 
 CI does this too: the `package` job runs the suite from the extracted sdist and
 emits an `sdist-suite` annotation with the exit status and summary, so a
-manifest regression fails the build instead of shipping. Locally the same run
+manifest regression fails the build instead of shipping.
+
+That step compares the number of tests the sdist ran against the count the
+README documents, and fails if they differ. The expectation is **derived from
+the README rather than written into the workflow**, because `README.md`'s figure
+is already enforced against the repository suite by
+`test_documentation_consistency` — so it cannot drift, whereas a literal in
+`ci.yml` went stale the moment the suite grew and nothing noticed.
+
+The comparison is also what stops the step passing vacuously. `unittest` exits 0
+on a *smaller* suite, so a `MANIFEST.in` that shipped fewer test files would
+otherwise look green while quietly covering less. Dropping one test module from
+the manifest was verified to fail the step with
+`ran=460 expected=518`. Locally the same run
 reports 23 skips rather than 12 unless `httpx` is installed, because the
 incremental-streaming tests gate on it — CI installs it first.
 
