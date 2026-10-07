@@ -148,6 +148,23 @@ touching these areas, keep the tests green:
   is not standalone and `node --check` on it alone will fail on undefined names.
   It is shipped in the sdist via `MANIFEST.in` — without it the test errors on a
   machine that has Node.
+* `test_packaging.WorkerRoutingTests` — `cloudflare/worker.js` is *executed*
+  under Node with upstream `fetch` stubbed to throw **and to record that it was
+  called**. Its only other test is `node --check`, which proves the file parses
+  and nothing about what it does: a syntax check cannot see a route answering
+  the wrong status, or a request quietly spending a real Gemini call. Stubbing
+  `fetch` rather than blocking the network is what makes "zero upstream calls"
+  assertable, so an unimplemented endpoint can be proven not to consume quota.
+  Two of the assertions are deliberately paired — one requires
+  `/v1/embeddings`, `/v1/audio/speech` and `/v1/images/generations` to answer
+  501, the other requires the remaining `/v1/*` fall-through to *still* forward
+  to chat, because that fall-through is intentional tolerance for clients that
+  post to slightly different paths. Without the pair, "fixed" and
+  "over-corrected" are indistinguishable. The dangling-timer assertion works by
+  wall clock: a leaked `setTimeout` keeps Node's event loop alive for
+  `requestTimeoutSec`, so a regression cannot finish inside `MAX_SECONDS`.
+  Skips when Node is absent, and runs from the sdist because `MANIFEST.in` ships
+  `cloudflare/`.
 * `test_packaging.CIWorkflowTests` — CI must fail when the suite fails. Actions'
   default shell on Linux is `bash -e {0}`, **without** `pipefail`, so
   `python -m unittest ... | tee log` reports `tee`'s status and a failing suite

@@ -261,9 +261,13 @@ vector. **Fix:** `max_request_bytes` (default 25 MiB), HTTP 413 on breach.
 * **`cloudflare/worker.js`** is a separate, self-contained edge deployment with
   its own Chinese documentation and its own release history. It duplicates the
   protocol layer by necessity (different runtime, no shared code possible). It
-  was left intact and documented rather than deleted — removing it would break
-  existing deployments. Its ideas (rate limiting, health endpoint) were ported
-  *into* the Python server instead.
+  was **not deleted** — removing it would break existing deployments — and its
+  ideas (rate limiting, health endpoint) were ported *into* the Python server
+  instead. It was not left untouched either: it gained `gemini-3.7-flash`, and
+  at 1.6.1 it began answering `501` for the three endpoints it does not
+  implement rather than falling through to chat completions, and stopped leaking
+  an abort timer on every failed upstream request. Its remaining divergences
+  from the Python server are tabulated in `cloudflare/README.MD`.
 * **Token accounting** remains a `len(text) // 4` estimate. Gemini Web does not
   return token counts, so any number here is an approximation; it is now
   documented as such rather than silently presented as exact.
