@@ -29,6 +29,29 @@ EXPECTED_MODULES = ["config", "gemini", "metrics", "models", "multimodal",
                     "ratelimit", "server", "tools", "webui"]
 
 
+def _git_repo_available():
+    """True when REPO_ROOT sits inside a working git repository.
+
+    An sdist or a `git archive` checkout has no `.git`. Git-based guards must
+    *skip* there rather than fail — but they must not pass vacuously either,
+    which is the trap: `git ls-files` outside a repo prints its fatal error to
+    stderr and leaves stdout empty, so an assertion of "stdout is empty" is
+    satisfied by git being broken or absent. Every git test here therefore
+    skips when there is no repository and asserts a zero exit code when there
+    is, so a green run means git actually answered.
+    """
+    try:
+        result = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"],
+                                cwd=REPO_ROOT, capture_output=True, text=True)
+    except OSError:
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "true"
+
+
+HAS_GIT = _git_repo_available()
+NO_GIT = "not a git working tree (sdist or git archive checkout)"
+
+
 class PyprojectTests(unittest.TestCase):
     def setUp(self):
         if tomllib is None:
@@ -156,9 +179,13 @@ class PackageStructureTests(unittest.TestCase):
             with self.subTest(module=name):
                 importlib.import_module(f"gemini_web2api.{name}")
 
+    @unittest.skipUnless(HAS_GIT, NO_GIT)
     def test_no_stale_bytecode_is_committed(self):
         result = subprocess.run(["git", "ls-files", "*/__pycache__/*", "*.pyc"],
                                 capture_output=True, text=True, cwd=REPO_ROOT)
+        # Without this, an empty stdout caused by git failing would look like a
+        # clean repository.
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "")
 
     def test_secrets_are_gitignored(self):
@@ -168,10 +195,12 @@ class PackageStructureTests(unittest.TestCase):
             with self.subTest(pattern=pattern):
                 self.assertIn(pattern, ignored)
 
+    @unittest.skipUnless(HAS_GIT, NO_GIT)
     def test_no_secret_files_are_tracked(self):
         result = subprocess.run(
             ["git", "ls-files", "config.json", "cookie.txt", "cookie.json", "gemini-auth.json"],
             capture_output=True, text=True, cwd=REPO_ROOT)
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "")
 
     def test_no_dead_code_left_behind(self):
@@ -705,14 +734,17 @@ class WindowsLauncherTests(unittest.TestCase):
         """stdout is parsed by the batch file, so messages must go to stderr."""
         self.assertIn("file=sys.stderr", self.setup)
 
+    @unittest.skipUnless(HAS_GIT, NO_GIT)
     def test_launcher_is_git_tracked_and_not_ignored(self):
         """A launcher that .gitignore swallows never reaches the user."""
-        result = subprocess.run(
-            [sys.executable, "-c",
-             "import subprocess,sys;"
-             "sys.exit(subprocess.run(['git','check-ignore','-q','start.bat']).returncode)"],
-            cwd=REPO_ROOT, capture_output=True)
-        self.assertEqual(result.returncode, 1, "start.bat is ignored by git")
+        result = subprocess.run(["git", "check-ignore", "-q", "start.bat"],
+                                cwd=REPO_ROOT, capture_output=True, text=True)
+        # check-ignore exits 1 when the path is NOT ignored, 0 when it is.
+        self.assertEqual(result.returncode, 1, f"start.bat is ignored by git: {result.stdout}")
+        tracked = subprocess.run(["git", "ls-files", "--error-unmatch", "start.bat"],
+                                 cwd=REPO_ROOT, capture_output=True, text=True)
+        self.assertEqual(tracked.returncode, 0,
+                         f"start.bat is not tracked by git: {tracked.stderr}")
 
     def test_launcher_uses_crlf_line_endings(self):
         """cmd.exe locates `goto` labels by scanning for CR-terminated lines.
@@ -751,6 +783,7 @@ class WindowsLauncherTests(unittest.TestCase):
         self.assertIn("-text", bat_rule,
                       f"*.bat must disable conversion, got: {bat_rule}")
 
+    @unittest.skipUnless(HAS_GIT, NO_GIT)
     def test_git_stores_the_launcher_blob_as_crlf(self):
         """Guards the retrieval paths that bypass a working-tree checkout."""
         result = subprocess.run(["git", "ls-files", "--eol", "start.bat"],
@@ -770,11 +803,13 @@ class WindowsLauncherTests(unittest.TestCase):
             self.assertRegex(text, rf"compileall[^\n]*\b{directory}\b",
                              f"CI does not compile-check {directory}/")
 
+    @unittest.skipUnless(HAS_GIT, NO_GIT)
     def test_venv_is_ignored(self):
         """The launcher creates .venv; it must never be committed."""
         result = subprocess.run(["git", "check-ignore", "-q", ".venv/"],
-                                cwd=REPO_ROOT, capture_output=True)
-        self.assertEqual(result.returncode, 0, ".venv/ is not gitignored")
+                                cwd=REPO_ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0,
+                         f".venv/ is not gitignored: {result.stdout}")
 
 
 class WindowsSetupHelperTests(unittest.TestCase):

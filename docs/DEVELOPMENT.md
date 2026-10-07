@@ -140,6 +140,20 @@ touching these areas, keep the tests green:
   Linux CI runner, so these are content guards. Each was verified to fail by
   injecting the violation it forbids.
 
+### Git-dependent tests must skip, not pass vacuously
+
+An sdist or a `git archive` checkout has no `.git`. `git ls-files` outside a
+repository prints its fatal error to **stderr** and leaves **stdout empty**, so
+a guard written as "assert stdout is empty" is satisfied by git being absent or
+broken — it passes vacuously and proves nothing. Two such tests existed here
+before this was noticed.
+
+Every git-based test therefore carries `@unittest.skipUnless(HAS_GIT, NO_GIT)`
+*and* asserts `result.returncode == 0`, so a green run in a real repository
+means git actually answered. `HAS_GIT` comes from
+`git rev-parse --is-inside-work-tree` at import time. Expect **5 skips** when
+running the suite from an extracted sdist.
+
 ### Editing `start.bat`
 
 **Keep CRLF line endings.** `cmd.exe` locates `goto` labels by scanning for
