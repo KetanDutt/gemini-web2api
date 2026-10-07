@@ -148,6 +148,14 @@ touching these areas, keep the tests green:
   is not standalone and `node --check` on it alone will fail on undefined names.
   It is shipped in the sdist via `MANIFEST.in` — without it the test errors on a
   machine that has Node.
+    Because that file now also covers the Status tab's account table, its
+    checks fail in **both** directions: a value escaped twice renders as
+    `&lt;svg` for the reader to see, and "no raw angle bracket" accepts that
+    happily. `test_metrics.DashboardTests.test_the_account_card_is_wired_and_covered`
+    covers the half Node cannot reach — that `refreshStatus` really does call the
+    renderers, with the payload key the server actually sends — and that the
+    renderers stay inside the extracted range, since moving them past `renderMd`
+    would drop them from the harness and quietly assert nothing.
 * `test_packaging.WorkerRoutingTests` — `cloudflare/worker.js` is *executed*
   under Node with upstream `fetch` stubbed to throw **and to record that it was
   called**. Its only other test is `node --check`, which proves the file parses
