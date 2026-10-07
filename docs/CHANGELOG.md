@@ -96,6 +96,18 @@ was reproduced.
 - `HEAD` and `OPTIONS` responses bypassed `send_json`, so they were never counted
   in `requests_served` or `status_codes` at all.
 
+- The Docker image could not be built. The Dockerfile's `COPY README.md
+  LICENSE ./` and the `.dockerignore` entries `*.md` and `LICENSE` were added in
+  the same pass and contradicted each other, so neither file reached the build
+  context and buildx failed with `"/README.md": not found`. Only CI could catch
+  it: there is no container runtime in the development environment, and the PR
+  said so. The image now copies `LICENSE` alone — MIT requires the notice to
+  accompany redistributed copies, and a published image is one — with a
+  `!LICENSE` negation placed *after* the pattern it undoes, since in
+  `.dockerignore` the last match wins. `README.md` is genuinely unnecessary:
+  nothing reads it at runtime and the image never runs `pip install .`, which is
+  the only step that would need pyproject's `readme`.
+
 - Three documentation links pointed at anchors that do not exist:
   `SECURITY.md#ssrf` (the heading is "SSRF protection on image fetching"),
   `AUTHENTICATION.md#authenticating-to-google` (the heading is "Outbound:
@@ -377,7 +389,7 @@ was reproduced.
 
 ### Tests
 
-- 18 tests → **489**, all offline. The Gemini wire protocol is faked at the frame
+- 18 tests → **499**, all offline. The Gemini wire protocol is faked at the frame
   level so real parsing and real HTTP handling are exercised without a network.
 - New modules for config layering, cookie formats, model resolution, protocol
   framing and streaming, prompt/tool parsing, every HTTP route, security
@@ -402,6 +414,16 @@ was reproduced.
   phantom models, `(mode, think)` disagreements, and undocumented gaps all fail,
   and `node --check` guards the Worker's syntax (skipped when Node is absent).
   Each guard was verified to fail on an injected violation before being kept.
+- `DockerfileTests` cross-checks the Dockerfile against `.dockerignore`
+  **statically**, which is the only way to guard this without a container
+  runtime: every `COPY` source must survive the ignore rules and exist in the
+  repository, secrets must stay excluded, no COPY may land on `config.json`, and
+  the `!LICENSE` negation must follow the pattern it undoes. The ignore matcher
+  reproduces Go's `filepath.Match` semantics rather than using `fnmatch`, whose
+  `*` crosses path separators and would report `docs/API.md` as matched by
+  `*.md`; two tests pin that behaviour, because a checker that cries wolf gets
+  ignored. All four guards were verified to fail on an injected violation,
+  including restoring the exact defect CI had just caught.
 - Every relative link **and heading anchor** in the 15-file Markdown corpus is
   resolved by `MarkdownLinkTests`. Anchor slugs follow github-slugger exactly —
   including the detail that each space becomes one hyphen, so an em dash removed

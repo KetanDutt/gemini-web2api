@@ -345,6 +345,187 @@ class DocumentationConsistencyTests(unittest.TestCase):
             )
 
 
+def _docker_pattern_matches(pattern, path):
+    """Approximate Docker's .dockerignore matching.
+
+    Docker uses Go's ``filepath.Match``, where ``*`` does **not** cross a path
+    separator and ``**`` does. Python's ``fnmatch`` differs: its ``*`` becomes
+    ``.*`` and happily crosses ``/``, which would make ``*.md`` match
+    ``docs/API.md`` and report false exclusions. A directory pattern also
+    excludes everything beneath it.
+    """
+    pattern = pattern.rstrip("/")
+    if path == pattern or path.startswith(pattern + "/"):
+        return True
+    regex = ""
+    i = 0
+    while i < len(pattern):
+        char = pattern[i]
+        if char == "*":
+            if pattern[i:i + 2] == "**":
+                regex += ".*"
+                i += 2
+                continue
+            regex += "[^/]*"
+        elif char == "?":
+            regex += "[^/]"
+        elif char in ".+^${}()|[]\\":
+            regex += "\\" + char
+        else:
+            regex += char
+        i += 1
+    return re.fullmatch(regex, path) is not None
+
+
+def _dockerignore_patterns(text):
+    return [line.strip() for line in text.splitlines()
+            if line.strip() and not line.strip().startswith("#")]
+
+
+def _excluded_by_dockerignore(path, patterns):
+    """Whether ``path`` is outside the build context. Last match wins."""
+    excluded = False
+    for pattern in patterns:
+        negate = pattern.startswith("!")
+        if negate:
+            pattern = pattern[1:]
+        if _docker_pattern_matches(pattern, path):
+            excluded = not negate
+    return excluded
+
+
+def _dockerfile_copy_sources(text):
+    """Every source path named by a COPY instruction, in order.
+
+    Handles backslash continuations and ``--chown``/``--from`` flags. The final
+    token of each instruction is the destination, not a source.
+    """
+    joined = []
+    buffer = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.endswith("\\"):
+            buffer += stripped[:-1].strip() + " "
+            continue
+        joined.append(buffer + stripped)
+        buffer = ""
+    if buffer:
+        joined.append(buffer)
+
+    sources = []
+    for line in joined:
+        if not line.upper().startswith("COPY "):
+            continue
+        tokens = [t for t in line[5:].split() if not t.startswith("--")]
+        if len(tokens) < 2:
+            continue
+        sources.extend(tokens[:-1])
+    return sources
+
+
+class DockerfileTests(unittest.TestCase):
+    """The Dockerfile and .dockerignore must agree.
+
+    CI is the only place this repository's image gets built, so a conflict
+    between the two files cannot be caught locally - and it cost a failed build
+    to find this one. `COPY README.md LICENSE` had been added while `*.md` and
+    `LICENSE` were added to .dockerignore, so neither file reached the build
+    context. Both checks below are static, which is the point: they run
+    anywhere, with no container runtime.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(REPO_ROOT, "Dockerfile"), encoding="utf-8") as handle:
+            cls.dockerfile = handle.read()
+        with open(os.path.join(REPO_ROOT, ".dockerignore"), encoding="utf-8") as handle:
+            cls.dockerignore = handle.read()
+        cls.patterns = _dockerignore_patterns(cls.dockerignore)
+        cls.sources = _dockerfile_copy_sources(cls.dockerfile)
+
+    def test_copy_instructions_were_found(self):
+        self.assertGreaterEqual(len(self.sources), 3,
+                                f"COPY parsing looks broken: {self.sources}")
+
+    def test_no_copy_source_is_excluded_from_the_context(self):
+        """The defect this class exists for: buildx fails with
+        `"/README.md": not found` when a COPY source is dockerignored."""
+        excluded = [s for s in self.sources
+                    if _excluded_by_dockerignore(s.rstrip("/"), self.patterns)]
+        self.assertEqual(excluded, [],
+                         f"Dockerfile COPYs paths that .dockerignore excludes: {excluded}")
+
+    def test_every_copy_source_exists_in_the_repository(self):
+        """Catches a typo'd COPY source, which fails the same way."""
+        missing = [s for s in self.sources
+                   if "*" not in s and not os.path.exists(os.path.join(REPO_ROOT, s))]
+        self.assertEqual(missing, [], f"Dockerfile COPYs nonexistent paths: {missing}")
+
+    def test_secrets_are_still_excluded(self):
+        """Tightening the ignore list to fix a COPY must not reopen the hole
+        that made an earlier image ship a baked-in `config.json`."""
+        for secret in ("config.json", "cookie.txt", "cookie.json",
+                       "gemini-auth.json", ".env"):
+            with self.subTest(secret=secret):
+                self.assertTrue(_excluded_by_dockerignore(secret, self.patterns),
+                                f"{secret} would be baked into the image")
+
+    def test_the_dockerfile_does_not_bake_in_a_config(self):
+        """Copying config.example.json to config.json used to ship the image
+        with the public key "sk-gemini", which looked like authentication and
+        was not.
+
+        Asserted against the parsed COPY sources, not the raw file: the
+        Dockerfile's own comment names config.example.json to explain why it is
+        absent, and scanning text would flag that explanation as the defect.
+        """
+        self.assertNotIn("config.example.json", self.sources)
+        self.assertEqual([s for s in self.sources if "config" in s], [],
+                         f"a config file would be baked into the image: {self.sources}")
+
+    def test_copy_destinations_do_not_write_a_config(self):
+        """The other half: a COPY could fetch a template and *land* it as
+        config.json, which is how the original defect actually worked."""
+        destinations = []
+        for line in self.dockerfile.splitlines():
+            stripped = line.strip()
+            if stripped.upper().startswith("COPY "):
+                tokens = [t for t in stripped[5:].split() if not t.startswith("--")]
+                if len(tokens) >= 2:
+                    destinations.append(tokens[-1])
+        self.assertTrue(destinations)
+        self.assertEqual([d for d in destinations if "config.json" in d], [],
+                         f"a COPY lands on config.json: {destinations}")
+
+    def test_licence_negation_follows_the_pattern_it_undoes(self):
+        """In .dockerignore the last match wins, so `!LICENSE` placed before
+        `LICENSE` would silently do nothing."""
+        lines = [line.strip() for line in self.dockerignore.splitlines()
+                 if line.strip() and not line.strip().startswith("#")]
+        self.assertIn("LICENSE", lines)
+        self.assertIn("!LICENSE", lines)
+        self.assertLess(lines.index("LICENSE"), lines.index("!LICENSE"),
+                        "`!LICENSE` must come after `LICENSE` or it has no effect")
+        self.assertFalse(_excluded_by_dockerignore("LICENSE", self.patterns))
+
+    def test_image_runs_as_an_unprivileged_user(self):
+        self.assertIn("USER gemini", self.dockerfile)
+        self.assertRegex(self.dockerfile, r"useradd\s+--uid\s+10001")
+
+    def test_image_has_a_healthcheck(self):
+        self.assertIn("HEALTHCHECK", self.dockerfile)
+        self.assertIn("_healthcheck.py", self.dockerfile)
+
+    def test_pattern_matcher_does_not_cross_separators(self):
+        """Guards the guard: `*.md` must match README.md but not docs/API.md,
+        or this class reports false exclusions and gets ignored."""
+        self.assertTrue(_docker_pattern_matches("*.md", "README.md"))
+        self.assertFalse(_docker_pattern_matches("*.md", "docs/API.md"))
+        self.assertTrue(_docker_pattern_matches("docs", "docs/API.md"))
+        self.assertTrue(_docker_pattern_matches("**/*.md", "docs/API.md"))
+        self.assertFalse(_docker_pattern_matches("tests", "latest.md"))
+
+
 def _slugify(heading):
     """GitHub's heading -> anchor rules, as implemented by github-slugger.
 

@@ -38,3 +38,9 @@ Dockerfile
 logo.png
 LICENSE
 .github
+
+# ...except the licence. MIT requires the notice to accompany redistributed
+# copies, and the image is one, so the Dockerfile COPYs it back in. Negations
+# must follow the pattern they undo: in .dockerignore the last match wins,
+# exactly as in .gitattributes.
+!LICENSE

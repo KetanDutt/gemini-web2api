@@ -17,7 +17,13 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY gemini_web2api/ ./gemini_web2api/
-COPY README.md LICENSE ./
+# LICENSE only. MIT requires the notice to accompany redistributed copies, so a
+# published image should carry it. README.md is deliberately absent: nothing
+# reads it at runtime and this image never runs `pip install .` (which is the
+# only thing that would need pyproject's `readme`), so copying it in would just
+# add weight. It is also excluded by .dockerignore, and the two must agree —
+# test_packaging.DockerfileTests cross-checks every COPY source against it.
+COPY LICENSE ./
 
 # Run as an unprivileged user. The server needs no write access to /app.
 RUN groupadd --gid 10001 gemini \
