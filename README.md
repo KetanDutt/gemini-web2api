@@ -34,6 +34,8 @@ Studio, ChatBox, NextChat, LobeChat, the OpenAI SDK, Codex CLI, Gemini CLI.
   fallback
 - **Tool calling** — function calling in both OpenAI and Google formats,
   including `tool_choice`
+- **JSON mode** — `response_format` with `json_object` and `json_schema`,
+  validated before the reply is returned rather than merely requested
 - **Image input** — URLs and base64, SSRF-guarded, uploaded through Gemini's own
   upload path
 - **Nine models** — Flash, Extended Thinking, Pro, Auto, Lite, with adjustable
@@ -422,7 +424,7 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api tests
 ```
 
-527 tests, all offline — the Gemini wire protocol is faked at the frame level.
+573 tests, all offline — the Gemini wire protocol is faked at the frame level.
 CI covers Python 3.8–3.13, a stdlib-only run with no third-party packages, a
 build-and-install-the-wheel check, lint and a Docker build.
 

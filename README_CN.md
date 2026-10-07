@@ -28,6 +28,7 @@
 - **Google 原生接口** —— `/v1beta/...`，兼容 Gemini CLI
 - **流式输出** —— 安装 `httpx` 时为真正的增量 SSE，否则降级为缓冲输出
 - **工具调用** —— 同时支持 OpenAI 与 Google 两种格式的 Function Calling，含 `tool_choice`
+- **JSON 模式** —— 支持 `response_format` 的 `json_object` 与 `json_schema`，返回前会校验结果，而不是只把要求写进提示词
 - **图片输入** —— 支持 URL 与 base64，内置 SSRF 防护，走 Gemini 自有上传通道
 - **九个模型** —— Flash、扩展思考、Pro、Auto、Lite，思考深度可调
 - **可选鉴权** —— 默认开放；配置密钥后支持 Bearer / `x-api-key` / `x-goog-api-key`，并可选限流
@@ -373,7 +374,7 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api tests
 ```
 
-527 个测试，全部离线运行——Gemini 协议在帧级别被模拟。CI 覆盖 Python 3.8–3.13、无第三方依赖的纯标准库运行、构建并安装 wheel 的校验、lint 与 Docker 构建。
+573 个测试，全部离线运行——Gemini 协议在帧级别被模拟。CI 覆盖 Python 3.8–3.13、无第三方依赖的纯标准库运行、构建并安装 wheel 的校验、lint 与 Docker 构建。
 
 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**
 

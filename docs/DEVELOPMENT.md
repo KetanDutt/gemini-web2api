@@ -177,6 +177,24 @@ touching these areas, keep the tests green:
   suite mean something: they require text-only requests and a `null` content part
   to come out *unannotated*, so "fixed" is distinguishable from "appends the
   note to everything". Shares `_run_worker_harness` with `WorkerRoutingTests`.
+* `test_jsonmode.JsonModeEndpointTests` — the most likely regression in JSON
+  mode is not a bug in the validator, it is someone editing `_chat` and dropping
+  the call to it. Validation is a separate module, so a request would still
+  succeed and still return prose with a `200` — exactly the behaviour the feature
+  exists to prevent, and undetectable from the response shape. These tests
+  therefore assert against the **prompt the upstream actually received** (via
+  `generate.call_args`), not only the response, because a stubbed upstream returns
+  valid JSON whether or not the instruction was ever sent. Removing the
+  instruction append, the chat enforcement, the `/v1/responses` `text.format`
+  read, the legacy-endpoint enforcement or the streaming buffer each fails a test;
+  all five were injected and confirmed.
+* `test_packaging.DocumentationConsistencyTests.test_the_documented_counters_are_the_counters_that_exist`
+  — `metrics.inc` ignores unknown names by design (a typo must not create a
+  phantom metric), which means a new counter that is never registered is
+  *silently* dropped and reads 0 forever. Adding `json_mode_failures` hit exactly
+  that: the increment was a no-op and only a test caught it. The guard compares
+  `metrics.snapshot()["counters"]` against the sample in `docs/API.md` key-for-key,
+  so a counter the docs omit, or one the docs invent, fails the build.
 * `test_packaging.CIWorkflowTests` — CI must fail when the suite fails. Actions'
   default shell on Linux is `bash -e {0}`, **without** `pipefail`, so
   `python -m unittest ... | tee log` reports `tee`'s status and a failing suite
@@ -257,7 +275,7 @@ the manifest was verified to fail the step with
 reports 23 skips rather than 12 unless `httpx` is installed, because the
 incremental-streaming tests gate on it — CI installs it first.
 
-Expect **527 tests and 12 skips** from an extracted sdist: 5 git-dependent and
+Expect **573 tests and 12 skips** from an extracted sdist: 5 git-dependent and
 7 repository-metadata. Anything else means either a file stopped shipping or a
 guard started skipping for a new reason. `test_the_sdist_ships_every_file_the_docs_promise`
 guards the first half automatically.

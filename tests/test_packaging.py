@@ -26,8 +26,8 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACKAGE_DIR = os.path.join(REPO_ROOT, "gemini_web2api")
 SHIM_PATH = os.path.join(REPO_ROOT, "gemini_web2api.py")
 
-EXPECTED_MODULES = ["config", "gemini", "metrics", "models", "multimodal",
-                    "ratelimit", "server", "tools", "webui"]
+EXPECTED_MODULES = ["config", "gemini", "jsonmode", "metrics", "models",
+                    "multimodal", "ratelimit", "server", "tools", "webui"]
 
 
 def _git_repo_available():
@@ -398,6 +398,32 @@ class DocumentationConsistencyTests(unittest.TestCase):
         conf_doc = self._read("docs", "CONFIGURATION.md")
         missing = [key for key in DEFAULT_CONFIG if key not in conf_doc]
         self.assertEqual(missing, [], f"undocumented config keys: {missing}")
+
+    def test_the_documented_counters_are_the_counters_that_exist(self):
+        """`metrics.inc` ignores unknown names, so a new counter is invisible.
+
+        That is deliberate — a typo must not create a phantom metric — but it
+        means forgetting to register a counter produces no error anywhere: the
+        increment is silently dropped and the metric reads 0 forever. It also
+        means `docs/API.md`'s sample can list a counter the code no longer has,
+        or omit one it gained, with nothing to notice.
+
+        The sample is not valid JSON (the histogram uses a literal ellipsis), so
+        the counters object is read by regex and compared key-for-key against a
+        live snapshot. That is a comparison against hand-maintained prose, not
+        against a generated literal, so it can fail.
+        """
+        from gemini_web2api import metrics
+        api_doc = self._read("docs", "API.md")
+        match = re.search(r'"counters":\s*\{(.*?)\}', api_doc, re.DOTALL)
+        self.assertIsNotNone(match, "docs/API.md no longer shows a counters sample")
+        documented = set(re.findall(r'"([a-z0-9_]+)":', match.group(1)))
+        actual = set(metrics.snapshot()["counters"])
+        self.assertEqual(
+            documented, actual,
+            "docs/API.md's counters sample and the real counters disagree: "
+            f"documented-only {sorted(documented - actual)}, "
+            f"real-only {sorted(actual - documented)}")
 
     def test_every_doc_page_is_in_the_index(self):
         docs_dir = os.path.join(REPO_ROOT, "docs")

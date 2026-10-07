@@ -54,6 +54,7 @@ A trailing slash is accepted.
 | `stream_options.include_usage` | Emits a final chunk with `choices: []` and `usage`. |
 | `tools` | OpenAI function declarations. See [Tool calling](#tool-calling). |
 | `tool_choice` | `"none"`, `"auto"`, `"required"`, or `{"type":"function","function":{"name":…}}`. |
+| `response_format` | `{"type":"json_object"}` or `{"type":"json_schema",…}`. See [JSON mode](#json-mode). |
 
 `temperature`, `top_p`, `max_tokens` and `n` are **accepted and ignored**: the
 Gemini Web endpoint exposes no such controls.
@@ -320,9 +321,10 @@ Requires an API key when keys are configured.
 {
   "metrics": {
     "uptime_sec": 3600.2,
-    "counters": {"requests": 512, "completions": 480, "streams": 32,
-                 "errors_4xx": 3, "errors_5xx": 1, "upstream_failures": 1,
-                 "rate_limited": 0, "images_uploaded": 4, "tool_calls_parsed": 12},
+      "counters": {"requests": 512, "completions": 480, "streams": 32,
+                   "errors_4xx": 3, "errors_5xx": 1, "upstream_failures": 1,
+                   "rate_limited": 0, "images_uploaded": 4, "tool_calls_parsed": 12,
+                   "json_mode_failures": 2},
     "status_codes": {"200": 508, "401": 3, "502": 1},
     "latency_ms_avg": 1840.5, "latency_ms_samples": 512,
     "latency_histogram_ms": {"50": 0, "100": 0, "…": 0, "inf": 3},
@@ -448,10 +450,91 @@ requested format. In practice:
 * Use `tool_choice: "required"` when a call is mandatory — it adds an explicit
   instruction to the prompt.
 
-Malformed tool blocks are dropped rather than returned as text, so a client
-never sees raw fence syntax.
+  Malformed tool blocks are dropped rather than returned as text, so a client
+  never sees raw fence syntax.
 
-## Image input
+## JSON mode
+
+```python
+response = client.chat.completions.create(
+    model="gemini-3.6-flash",
+    messages=[{"role": "user", "content": "Invent a person."}],
+    response_format={"type": "json_object"},
+)
+json.loads(response.choices[0].message.content)   # always parses
+```
+
+Supported on `POST /v1/chat/completions`, `POST /v1/completions`, and — spelled
+`text.format`, as that API defines it — `POST /v1/responses`. Both spellings are
+read on `/v1/responses`, because clients migrating from chat completions send
+`response_format`.
+
+| `type` | Behaviour |
+|---|---|
+| `text` | The default. No constraint; identical to omitting the field. |
+| `json_object` | The reply must be a JSON **object**. |
+| `json_schema` | The reply must validate against `json_schema.schema`. |
+
+### How it works, and what it does not guarantee
+
+The Gemini Web endpoint has no equivalent of `response_format`, and a proxy
+cannot create one. What this service does instead is:
+
+1. **Append an instruction** to the prompt asking for a single bare JSON value,
+   including the schema when one was given. The instruction is appended *last*,
+   because the conversation is flattened into one text block and the most
+   recent instruction governs — so a client's earlier "reply in prose" cannot
+   override it.
+2. **Validate the reply** before returning it. A reply is searched for a JSON
+   value (bare, inside a code fence, or embedded in a sentence), and if a schema
+   was supplied the value is checked against it.
+
+**The difference from OpenAI matters, and is not hidden.** OpenAI enforces
+`json_schema` *during* generation, so its output cannot violate the schema.
+Here the constraint is a request in a prompt, checked afterwards, so a
+violation is possible. When the model does not comply, the request fails with
+`502` rather than returning something that looks right:
+
+| `code` | Meaning |
+|---|---|
+| `json_parse_failed` | The reply contained no JSON value at all. |
+| `json_schema_violation` | The reply parsed, but did not match the schema. |
+
+Both are `502`, because the fault is the model's, not the client's. The error
+message names the failing path (for example `$.items[1].n: expected integer,
+got string`) so the cause is visible without re-running the request.
+
+What is returned is the **validated value re-serialised**, not the raw reply.
+Passing the raw text through would mean checking one string and sending
+another — and the raw text is frequently not JSON, since models add code fences
+or a sentence of preamble no matter what they were told.
+
+A request offering `tools` is exempt: if the model answers with a tool call,
+that is a legitimate outcome (`finish_reason: "tool_calls"`) and the leftover
+text is not the answer, so it is not validated against the schema.
+
+Streaming requests are buffered in JSON mode and delivered as a single chunk,
+for the same reason tool calls are: validity can only be judged once the reply
+is complete, and a `200` header cannot be retracted. The stream is still
+well-formed and terminates with `[DONE]`.
+
+### Enforced schema keywords
+
+A partial validator that does not say what it skips is worse than none, so this
+is the complete list of what is checked:
+
+`type` (including unions) · `enum` · `const` · `required` · `properties` ·
+`additionalProperties` (`false` and subschema forms) · `items` · `minItems` ·
+`maxItems` · `minLength` · `maxLength` · `pattern` · `minimum` · `maximum` ·
+`exclusiveMinimum` · `exclusiveMaximum`
+
+Any other keyword is **not** enforced — `format`, `oneOf`, `anyOf`, `allOf`,
+`$ref`, `not` and the rest are ignored. A schema relying on them is not fully
+validated, and this service does not claim otherwise. An unenforceable
+`pattern` (an invalid regular expression) is ignored rather than reported as a
+model violation, since that is the client's schema being wrong.
+
+  ## Image input
 
 ```python
 response = client.chat.completions.create(

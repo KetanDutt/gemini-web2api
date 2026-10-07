@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from urllib.parse import unquote, urlsplit
 
-from . import __version__
+from . import __version__, jsonmode
 from .config import CONFIG
 from .config import snapshot as config_snapshot
 from .gemini import HAS_HTTPX, generate, generate_stream, log
@@ -663,6 +663,36 @@ class GeminiHandler(BaseHTTPRequestHandler):
             return
         self.send_error_json(502, f"upstream error: {exc}", "api_error")
 
+    def _json_content(self, spec, text):
+        """Return the model's reply as canonical JSON, or None after answering.
+
+        The *parsed* value is re-serialised rather than the raw reply being
+        forwarded, because the guarantee applies to the value that was checked.
+        Passing the raw text through would mean validating one string and
+        sending another — and the raw text is often not JSON at all, since
+        models fence it or preface it with a sentence no matter what the
+        instruction asked for.
+
+        A None return unambiguously means "already answered with an error":
+        ``json.dumps`` never returns None, so a valid result is always a string.
+        """
+        if not spec:
+            return text
+        value, error = jsonmode.extract_json(text)
+        if error is not None:
+            inc("json_mode_failures")
+            log(f"{self.request_id} json mode: {error}", "error")
+            self.send_error_json(502, error, "api_error", "json_parse_failed")
+            return None
+        errors = jsonmode.validate(spec, value)
+        if errors:
+            inc("json_mode_failures")
+            message = jsonmode.describe(errors)
+            log(f"{self.request_id} json mode: {message}", "error")
+            self.send_error_json(502, message, "api_error", "json_schema_violation")
+            return None
+        return json.dumps(value, ensure_ascii=False)
+
     def _chunk(self, cid, model_name, delta, finish=None):
         return {
             "id": cid,
@@ -688,6 +718,14 @@ class GeminiHandler(BaseHTTPRequestHandler):
             return
         model_name, model_id, think_mode, extra_fields = resolved
 
+        # Parsed before the prompt is built so a malformed request costs
+        # nothing, and before any image upload so it cannot consume quota.
+        json_spec, error = jsonmode.parse(req.get("response_format"))
+        if error:
+            self.send_error_json(400, error, "invalid_request_error",
+                                 "invalid_response_format")
+            return
+
         tools = req.get("tools")
         tool_choice = req.get("tool_choice", "auto")
         prompt, images = messages_to_prompt(req.get("messages", []), tools, tool_choice)
@@ -695,6 +733,12 @@ class GeminiHandler(BaseHTTPRequestHandler):
             self.send_error_json(400, "empty prompt: 'messages' produced no content",
                                  "invalid_request_error", "empty_prompt")
             return
+
+        # Appended last because the conversation is flattened into one block and
+        # the most recent instruction governs, so a client's "reply in prose"
+        # earlier in the conversation cannot override this one.
+        if json_spec:
+            prompt += "\n\n" + jsonmode.instruction_for(json_spec)
 
         stream = bool(req.get("stream", False))
         include_usage = bool((req.get("stream_options") or {}).get("include_usage"))
@@ -706,9 +750,13 @@ class GeminiHandler(BaseHTTPRequestHandler):
 
         wants_tools = bool(tools) and tool_choice != "none"
         log(f"{self.request_id} chat model={model_name} think={think_mode} stream={stream} "
-            f"tools={wants_tools} prompt_chars={len(prompt)} images={len(images or [])}")
+            f"tools={wants_tools} prompt_chars={len(prompt)} images={len(images or [])} "
+            f"json={json_spec['kind'] if json_spec else 'off'}")
 
-        if stream and not wants_tools:
+        # JSON mode buffers for the same reason tool calls do: validity can only
+        # be judged on the complete reply, and a violation must not be reported
+        # after a 200 has already gone out.
+        if stream and not wants_tools and not json_spec:
             self._stream_chat(cid, model_name, model_id, think_mode, prompt,
                               file_refs, extra_fields, include_usage)
             return
@@ -725,6 +773,14 @@ class GeminiHandler(BaseHTTPRequestHandler):
             if tool_calls:
                 inc("tool_calls_parsed", len(tool_calls))
 
+        # Skipped when the model answered with a tool call instead: that is a
+        # legitimate outcome for a request that also offered tools, and the
+        # leftover text after the call block is not the answer.
+        if json_spec and not tool_calls:
+            text = self._json_content(json_spec, text)
+            if text is None:
+                return
+
         message = {"role": "assistant", "content": text or None}
         if tool_calls:
             message["tool_calls"] = tool_calls
@@ -732,8 +788,8 @@ class GeminiHandler(BaseHTTPRequestHandler):
         usage = _usage(prompt, text)
 
         if stream:
-            # Tool calls can only be recognised once the full reply is in hand,
-            # so this is a single-chunk stream.
+            # Tool calls and JSON mode can only be recognised once the full
+            # reply is in hand, so this is a single-chunk stream.
             self._start_sse()
             inc("streams")
             self._sse_write(self._chunk(cid, model_name, message, finish))
@@ -830,11 +886,24 @@ class GeminiHandler(BaseHTTPRequestHandler):
             return
         model_name, model_id, think_mode, extra_fields = resolved
 
+        # Supported here as well as on chat completions, because OpenAI's legacy
+        # endpoint accepts `response_format` too — accepting the parameter and
+        # ignoring it would be the silent-drop failure again.
+        json_spec, error = jsonmode.parse(req.get("response_format"))
+        if error:
+            self.send_error_json(400, error, "invalid_request_error",
+                                 "invalid_response_format")
+            return
+        if json_spec:
+            raw_prompt += "\n\n" + jsonmode.instruction_for(json_spec)
+
         stream = bool(req.get("stream", False))
         cid = f"cmpl-{uuid.uuid4().hex[:12]}"
         created = int(time.time())
 
-        if stream:
+        # Buffered in JSON mode so the reply can be validated before any part of
+        # it is sent; a violation cannot be retracted after a 200 header.
+        if stream and not json_spec:
             self._start_sse()
             inc("streams")
             collected = []
@@ -868,6 +937,25 @@ class GeminiHandler(BaseHTTPRequestHandler):
                                   extra_fields, model_name)
         except Exception as exc:
             self._upstream_failure(exc)
+            return
+
+        if json_spec:
+            text = self._json_content(json_spec, text)
+            if text is None:
+                return
+
+        if stream:
+            # JSON mode, buffered: emit the validated reply as one event so the
+            # legacy streaming shape still terminates correctly.
+            self._start_sse()
+            inc("streams")
+            self._sse_write({
+                "id": cid, "object": "text_completion", "created": created,
+                "model": model_name,
+                "choices": [{"index": 0, "text": text, "logprobs": None,
+                             "finish_reason": "stop"}],
+            })
+            self._sse_done()
             return
 
         inc("completions")
@@ -957,6 +1045,22 @@ class GeminiHandler(BaseHTTPRequestHandler):
             return
         model_name, model_id, think_mode, extra_fields = resolved
 
+        # The Responses API spells this `text.format`; `response_format` is
+        # accepted too because clients migrating from chat completions send it.
+        # Reading only the documented spelling would silently ignore the other
+        # — the exact failure mode this project removed from its Worker.
+        text_options = req.get("text")
+        format_spec = None
+        if isinstance(text_options, dict) and "format" in text_options:
+            format_spec = text_options.get("format")
+        elif "response_format" in req:
+            format_spec = req.get("response_format")
+        json_spec, error = jsonmode.parse(format_spec)
+        if error:
+            self.send_error_json(400, error, "invalid_request_error",
+                                 "invalid_response_format")
+            return
+
         messages = self._responses_to_messages(req)
         tools = req.get("tools")
         tool_choice = req.get("tool_choice", "auto")
@@ -964,6 +1068,8 @@ class GeminiHandler(BaseHTTPRequestHandler):
         if not prompt.strip():
             self.send_error_json(400, "empty input", "invalid_request_error", "empty_input")
             return
+        if json_spec:
+            prompt += "\n\n" + jsonmode.instruction_for(json_spec)
 
         file_refs, error = self._prepare_images(images)
         if error is not None:
@@ -971,7 +1077,8 @@ class GeminiHandler(BaseHTTPRequestHandler):
 
         wants_tools = bool(tools) and tool_choice != "none"
         log(f"{self.request_id} responses model={model_name} tools={wants_tools} "
-            f"prompt_chars={len(prompt)}")
+            f"prompt_chars={len(prompt)} "
+            f"json={json_spec['kind'] if json_spec else 'off'}")
 
         try:
             text = self._generate(prompt, model_id, think_mode, file_refs, extra_fields, model_name)
@@ -984,6 +1091,11 @@ class GeminiHandler(BaseHTTPRequestHandler):
             text, tool_calls = parse_tool_calls(text)
             if tool_calls:
                 inc("tool_calls_parsed", len(tool_calls))
+
+        if json_spec and not tool_calls:
+            text = self._json_content(json_spec, text)
+            if text is None:
+                return
 
         rid = f"resp_{uuid.uuid4().hex[:16]}"
         mid = f"msg_{uuid.uuid4().hex[:12]}"

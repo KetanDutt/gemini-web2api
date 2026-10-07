@@ -341,6 +341,42 @@ was reproduced.
 - `.github/workflows/ci.yml`: the suite on Python 3.8/3.11/3.12/3.13, a
   stdlib-only job, a build-and-install-the-wheel job, ruff, and a Docker build.
 
+### Added
+
+- **`response_format` support** — JSON mode (`json_object`) and structured
+  outputs (`json_schema`) on `POST /v1/chat/completions`, `/v1/completions`, and
+  `/v1/responses` (spelled `text.format` there, with `response_format` also
+  accepted). The parameter was previously ignored entirely: a client asking for
+  JSON received prose with a `200`, and no way to tell the difference.
+
+  Gemini's web endpoint has no equivalent, so this is implemented in the two
+  places a proxy can — the prompt and the response. An instruction is appended
+  *last*, because the conversation is flattened into one text block and the most
+  recent instruction governs; the reply is then searched for a JSON value (bare,
+  fenced, or embedded in a sentence) and validated against the schema. The
+  **validated value is re-serialised** rather than the raw reply being forwarded,
+  since checking one string and sending another would make the guarantee
+  meaningless.
+
+  A non-compliant reply fails with `502 json_parse_failed` or
+  `502 json_schema_violation` instead of returning something that looks like an
+  answer. This is a real divergence from OpenAI, which enforces schemas during
+  generation and so cannot violate them — here a violation is possible and is
+  reported rather than prevented. `docs/API.md` states the enforced keyword list
+  in full, because a partial validator that does not say what it skips promises
+  more than it delivers: `type`, `enum`, `const`, `required`, `properties`,
+  `additionalProperties`, `items`, `minItems`/`maxItems`,
+  `minLength`/`maxLength`, `pattern`, `minimum`/`maximum`, and the exclusive
+  bounds are enforced; `format`, `oneOf`/`anyOf`/`allOf`, `$ref` and the rest are
+  not.
+
+  Streaming requests are buffered in JSON mode and delivered as one chunk, for
+  the same reason tool calls are: validity can only be judged on the complete
+  reply, and a `200` header cannot be retracted.
+
+- A `json_mode_failures` counter, so the rate of non-compliant replies is
+  visible to operators rather than only to clients.
+
 ### Changed
 
 **Performance**
@@ -495,7 +531,7 @@ was reproduced.
 
 ### Tests
 
-- 18 tests → **527**, all offline. The Gemini wire protocol is faked at the frame
+- 18 tests → **573**, all offline. The Gemini wire protocol is faked at the frame
   level so real parsing and real HTTP handling are exercised without a network.
 - New modules for config layering, cookie formats, model resolution, protocol
   framing and streaming, prompt/tool parsing, every HTTP route, security

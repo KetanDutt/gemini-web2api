@@ -33,6 +33,10 @@ _counters = {
     "rate_limited": 0,
     "images_uploaded": 0,
     "tool_calls_parsed": 0,
+    # Requests where the client asked for JSON and the model did not comply.
+    # Separate from upstream_failures because the upstream answered fine — it
+    # just answered prose, which only a client with a parser cares about.
+    "json_mode_failures": 0,
 }
 _latency = [0] * (len(_LATENCY_BUCKETS) + 1)
 _latency_sum = [0.0]
