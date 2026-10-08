@@ -9,6 +9,88 @@ was reproduced.
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **The web console was rebuilt on an explicit design system.** The page is
+  still one self-contained file with no external assets, but every surface now
+  comes from a small set of tokens — four glass strengths (`glass-1` …
+  `glass-4`), four blur radii, one radius and spacing scale, one shadow ramp,
+  six named z-layers and a motion scale (130/190/280/440 ms with spring and
+  ease-out curves). Nothing in the interface invents a value: a new component
+  picks a token or the token set grows.
+- **Navigation floats instead of framing.** The dock is a glass bar that hovers
+  above the content, glides its active pill between tabs, deepens its shadow
+  once content scrolls under it, and becomes a thumb-reachable bottom bar under
+  900 px — the same DOM, repositioned rather than reimplemented.
+- **Appearance is now a first-class choice.** Light, dark and follow-the-system
+  are selectable from the masthead and remembered per browser; the dark scheme
+  is a designed palette (deep neutral canvas, translucent surfaces, reduced
+  border contrast) rather than an inversion.
+- **Every view got the same treatment, not just the landing tab.** Chat
+  (conversation rail, streamed replies, avatar and meta chips, morphing
+  send/stop control), Status (stat tiles with animated counters, tinted
+  callouts, account cooldown meters, a real latency histogram with an accessible
+  summary), Activity (relative timestamps, per-row entry animation for new
+  requests, sticky header), Models (filterable cards) and API (copy-ready
+  snippets).
+- **Tables reflow instead of scrolling sideways on phones.** Under 760 px each
+  row becomes a labelled block, which is what the `data-label` attributes on
+  the generated cells exist for.
+
+### Added
+
+- **Command palette** (`Ctrl`/`Cmd`+`K`): jump to a section, switch
+  conversation, refresh the current view, copy the base URL, cycle the theme.
+- **Keyboard shortcuts** with a discoverable sheet (`?`): `Ctrl`/`Cmd`+`1`…`5`
+  for sections, `Ctrl`/`Cmd`+`N` for a new chat, `/` to focus the composer.
+- **Glass toasts** for copy/save/delete confirmations, a clipboard fallback for
+  plain-HTTP deployments where `navigator.clipboard` is unavailable, skeleton
+  loading states, and empty states for every table, chart and list.
+- **Accessibility work**: a proper tablist (roving tabindex, arrow keys,
+  `aria-selected`/`aria-controls`), focus-trapped dialogs that restore focus,
+  labelled icon-only buttons, `prefers-reduced-motion` and
+  `prefers-reduced-transparency` handling, and a contrast-checked palette.
+
+### Fixed
+
+- **The Activity filter no longer waits on a fetch.** Narrowing the list
+  re-renders the rows already held, so the view updates immediately instead of
+  depending on the next poll (and works while a refresh is in flight).
+- **A streamed upstream failure is reported.** The gateway emits the error
+  inside the SSE stream (HTTP status is already 200 by then); the console only
+  looked at chunk `choices`, so a failed turn ended as a silent empty reply.
+  It now surfaces the message and says why in a toast.
+- **A stale conversation pointer repairs itself.** If `gw2a.active` named a
+  conversation that no longer exists (another tab deleted it, storage was
+  cleared), the chat pane showed the empty state while the rail still listed
+  conversations. The pointer now falls back to the newest conversation.
+- **The footer laid out as one run-on line.** The flex rule targeted the
+  `<footer>` while the script fills a `<span>` inside it, so the separator dots
+  collapsed; the rule now targets the span that owns the items.
+- **Model ids no longer break mid-token.** `overflow-wrap: anywhere` let the id
+  column shrink below the width of its own word, so `gemini-3.5-flash-thinking`
+  broke as `gemini-3.5-flash-thinking-` / `lite`. It is `break-word` now, and a
+  long tag wraps inside its pill instead of pushing the card wide.
+- **Long transcripts no longer push the composer off screen.** The console is
+  bounded to the viewport and the content pane scrolls inside it, so the
+  transcript, composer, dock and masthead stay put while a long reply scrolls.
+- **Phone layouts stop spending the screen on chrome.** Under 620 px the chat
+  toolbar stacks instead of clipping its API-key field and the two selects share
+  a row, while the section blurb clamps to two lines: a phone shows roughly a
+  third more transcript before scrolling. Copy chips take a 34 px touch target
+  on coarse pointers.
+
+### Accessibility
+
+- Sections animate in over 440 ms and everything else over 130-280 ms, on one
+  motion scale; `prefers-reduced-motion` collapses all of it.
+- The transcript, composer, dock and masthead stay put on a long conversation,
+  so the composer never leaves the screen while a reply scrolls.
+
+---
+
 ## [1.3.0]
 
 ### Fixed

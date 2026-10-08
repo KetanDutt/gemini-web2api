@@ -45,7 +45,7 @@ here is translation between those two.
 | `jsonmode.py` | `response_format` instruction, validation of the reply against it | — |
 | `tools.py` | Prompt construction for both dialects, tool-call extraction | `gemini` |
 | `server.py` | HTTP endpoints, auth, rate limiting, SSE, error mapping | everything |
-| `webui.py` | Self-contained status dashboard | — |
+| `webui.py` | Self-contained status dashboard (one HTML page, design tokens, no external assets) | — |
 | `ratelimit.py` | Fixed-window limiter | — |
 | `metrics.py` | Counters and latency histogram | — |
 | `prometheus.py` | Prometheus text exposition of a metrics snapshot | `metrics` |
