@@ -32,7 +32,7 @@ gemini_web2api/
   multimodal.py            image fetch (SSRF-guarded) + Scotty upload
   tools.py                 prompt construction, tool-call parsing
   server.py                HTTP endpoints, auth, rate limit, SSE
-  webui.py                 self-contained dashboard
+  webui.py                 self-contained dashboard (one page: tokens, markup, script)
   ratelimit.py             fixed-window limiter
   metrics.py               counters and latency histogram
   _healthcheck.py          container liveness probe (standalone)

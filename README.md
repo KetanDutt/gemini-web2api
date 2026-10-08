@@ -55,8 +55,10 @@ Studio, ChatBox, NextChat, LobeChat, the OpenAI SDK, Codex CLI, Gemini CLI.
   another, and a single-cookie setup behaves exactly as before
 - **Web console** — open `http://localhost:8081/` for a chat playground, live
   status, request activity, model picker and ready-to-paste client config —
-  a self-contained page (no external assets) in a light/dark Liquid Glass
-  design, with a scroll-to-latest button for long transcripts
+  a self-contained page (no external assets) in a Liquid Glass design system:
+  floating dock navigation, light/dark/system themes, skeleton loading, a
+  command palette (`Ctrl`/`Cmd`+`K`), keyboard shortcuts, glass toasts and an
+  accessible focus order, all honouring `prefers-reduced-motion`
 - **Production-ready packaging** — non-root Docker image, healthchecks,
   environment configuration, graceful shutdown, CI
 - **One-click Windows setup** — double-click `start.bat` to create a venv,
