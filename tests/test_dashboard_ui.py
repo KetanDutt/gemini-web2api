@@ -79,10 +79,10 @@ class _Balanced(html.parser.HTMLParser):
         if tag in self.VOID:
             return
         if tag not in self.stack:
-            self.errors.append("stray </%s>" % tag)
+            self.errors.append(f"stray </{tag}>")
             return
         while self.stack and self.stack[-1] != tag:
-            self.errors.append("unclosed <%s>" % self.stack.pop())
+            self.errors.append(f"unclosed <{self.stack.pop()}>")
         if self.stack:
             self.stack.pop()
 
@@ -113,14 +113,13 @@ class DocumentStructureTests(unittest.TestCase):
     def test_generated_markup_only_uses_ids_that_exist(self):
         """Ids assembled in strings (palette options, tab panels) still resolve."""
         page = _page()
-        script = _script(page)
         ids = set(re.findall(r'\bid="([^"]+)"', page))
-        for prefix in ("tab-",):
-            for name in re.findall(r"'tab-' \+ ([a-z]+)", script):
-                pass
-        self.assertIn('id="tab-chat"', page)
-        self.assertEqual("tab-chat" in ids and "tab-status" in ids and "tab-activity" in ids
-                         and "tab-models" in ids and "tab-api" in ids, True)
+        # Every nav item must have a panel to switch to, and every panel a nav
+        # item: either half missing is a dead control.
+        panels = {i[4:] for i in ids if i.startswith("tab-")}
+        tabs = set(re.findall(r'data-tab="([a-z]+)"', page))
+        self.assertEqual({"chat", "status", "activity", "models", "api"}, panels | tabs)
+        self.assertEqual(panels, tabs)
 
     def test_one_inline_script_and_nothing_to_fetch(self):
         """The escaping harness extracts the first bare <script> and needs it to
@@ -153,9 +152,9 @@ class TabContractTests(unittest.TestCase):
         names = re.findall(r"(\w+):", order)
         page = _page()
         for name in names:
-            self.assertIn('data-tab="%s"' % name, page,
-                          "%s is in the script but has no nav item" % name)
-            self.assertIn('id="tab-%s"' % name, page)
+            self.assertIn(f'data-tab="{name}"', page,
+                          f"{name} is in the script but has no nav item")
+            self.assertIn(f'id="tab-{name}"', page)
         self.assertEqual(5, len(names))
 
 
@@ -170,7 +169,7 @@ class StylesheetTests(unittest.TestCase):
                 depth += 1
             elif char == "}":
                 depth -= 1
-            self.assertGreaterEqual(depth, 0, "} before { at offset %d" % index)
+            self.assertGreaterEqual(depth, 0, "} before { at offset " + str(index))
         self.assertEqual(0, depth)
 
     def test_every_variable_used_is_defined(self):
@@ -234,7 +233,7 @@ class StylesheetTests(unittest.TestCase):
             if re.search(r'type="(?:hidden|submit|button)"', field):
                 continue
             # A checkbox inside <label>…</label> takes its name from the label.
-            if ident and re.search(r"<label\b[^>]*>(?:(?!</label>).)*?%s" % re.escape(field),
+            if ident and re.search(r"<label\b[^>]*>(?:(?!</label>).)*?" + re.escape(field),
                                    body, re.DOTALL):
                 continue
             unlabelled.append(field[:70])
