@@ -7,6 +7,7 @@ OpenAI ``image_url`` part has to be downloaded and re-uploaded to Google's
 import ipaddress
 import re
 import socket
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -112,6 +113,31 @@ class _GuardedRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+# One opener per (proxy, guarded) combination, reused across calls. The
+# handlers urllib builds are stateless per request, so sharing an opener is
+# safe, and image fetches/uploads are the only place the stdlib transport is
+# constructed per call — building one per image was pure waste on a path that
+# already pays two round trips per image.
+_opener_cache = {}
+_opener_lock = threading.Lock()
+
+
+def _cached_opener(proxy, guarded=False):
+    """Return the shared urllib opener for this proxy/redirect policy."""
+    key = (proxy or "", guarded)
+    with _opener_lock:
+        opener = _opener_cache.get(key)
+        if opener is None:
+            handlers = [urllib.request.HTTPSHandler(context=_get_ssl_ctx())]
+            if guarded:
+                handlers.insert(0, _GuardedRedirect)
+            if proxy:
+                handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+            opener = urllib.request.build_opener(*handlers)
+            _opener_cache[key] = opener
+        return opener
+
+
 def _read_capped(response, limit):
     """Read at most ``limit`` bytes, refusing oversized payloads."""
     declared = response.headers.get("Content-Length")
@@ -124,11 +150,13 @@ def _read_capped(response, limit):
 
 
 def fetch_image_bytes(url):
-    """Download an image and return its bytes.
+    """Download an image and return its bytes, or ``b""`` on any failure.
 
-    Returns ``b""`` on failure so a single bad image does not abort an otherwise
-    valid request; the reason is logged. Raises nothing by contract, because
-    callers treat an empty result as "skip this image".
+    Raises nothing by contract: every refusal (bad scheme, private address,
+    oversize, network error) is logged and reported as an empty result, and the
+    caller turns that into a 400 naming the URL — a missing or blocked image is
+    the client's problem, and failing the request is louder than silently
+    answering a prompt the user thinks included a picture.
     """
     limit = int(CONFIG.get("max_image_bytes", 20 * 1024 * 1024))
     try:
@@ -137,11 +165,7 @@ def fetch_image_bytes(url):
         log(f"Image fetch refused: {exc}", "warning")
         return b""
 
-    proxy = CONFIG.get("proxy")
-    handlers = [_GuardedRedirect, urllib.request.HTTPSHandler(context=_get_ssl_ctx())]
-    if proxy:
-        handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
-    opener = urllib.request.build_opener(*handlers)
+    opener = _cached_opener(CONFIG.get("proxy"), guarded=True)
     try:
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         with opener.open(req, timeout=30) as resp:
@@ -240,14 +264,6 @@ def reset_page_token_cache():
 
 # ─── Upload ──────────────────────────────────────────────────────────────────
 
-def _upload_opener():
-    proxy = CONFIG.get("proxy")
-    handlers = [urllib.request.HTTPSHandler(context=_get_ssl_ctx())]
-    if proxy:
-        handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
-    return urllib.request.build_opener(*handlers)
-
-
 def upload_image(image_bytes, filename="image.png", mime_type="image/png"):
     """Upload an image via Scotty resumable upload; return the file reference.
 
@@ -264,7 +280,7 @@ def upload_image(image_bytes, filename="image.png", mime_type="image/png"):
     from .gemini import load_cookie
     cookie_str, sapisid = load_cookie()
 
-    opener = _upload_opener()
+    opener = _cached_opener(CONFIG.get("proxy"))
 
     start_headers = {
         "Push-ID": push_id,

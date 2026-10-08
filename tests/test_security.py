@@ -366,9 +366,23 @@ class RateLimitUnitTests(unittest.TestCase):
     def test_retry_after_is_positive_when_limited(self):
         limiter = RateLimiter(1, 60)
         limiter.check("a")
-        allowed, retry_after, _remaining = limiter.check("a")
+        allowed, retry_after, _remaining, _reset = limiter.check("a")
         self.assertFalse(allowed)
         self.assertGreaterEqual(retry_after, 1)
+
+    def test_reset_seconds_count_down_to_the_window_end(self):
+        """The reset value feeds X-RateLimit-Reset-Requests, so it must be real."""
+        limiter = RateLimiter(2, 60)
+        _allowed, _retry, remaining, reset = limiter.check("a")
+        self.assertEqual(remaining, 1)
+        self.assertGreater(reset, 0)
+        self.assertLessEqual(reset, 60)
+        # A refused hit reports the same window end as retry_after.
+        limiter.check("a")
+        allowed, retry_after, remaining, reset = limiter.check("a")
+        self.assertFalse(allowed)
+        self.assertEqual(remaining, 0)
+        self.assertEqual(retry_after, reset)
 
     def test_window_expiry_resets_the_count(self):
         limiter = RateLimiter(1, 60)
@@ -454,6 +468,115 @@ class RateLimitEndpointTests(ServerTestCase):
         _status, _headers, body = self.get_json(
             "/status", headers={"Authorization": "Bearer sk-test"})
         self.assertTrue(body["rate_limit"]["enabled"])
+
+    def test_success_carries_openai_style_ratelimit_headers(self):
+        """Clients poll this to pace themselves; absent headers force guessing."""
+        status, headers, _body = self.get(
+            "/v1/models", headers={"Authorization": "Bearer sk-test"})
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get("X-RateLimit-Limit-Requests"), "3")
+        self.assertEqual(headers.get("X-RateLimit-Remaining-Requests"), "2")
+        self.assertEqual(headers.get("X-RateLimit-Reset-Requests"), "60s")
+
+    def test_429_carries_retry_after_matching_the_reset_header(self):
+        """Retry-After and X-RateLimit-Reset must tell the same story."""
+        headers_auth = {"Authorization": "Bearer sk-test"}
+        for _ in range(3):
+            self.get("/v1/models", headers=headers_auth)
+        status, headers, _body = self.get("/v1/models", headers=headers_auth)
+        self.assertEqual(status, 429)
+        retry_after = int(headers.get("Retry-After"))
+        reset = int(headers.get("X-RateLimit-Reset-Requests").rstrip("s"))
+        self.assertGreater(retry_after, 0)
+        self.assertEqual(retry_after, reset)
+        self.assertEqual(headers.get("X-RateLimit-Remaining-Requests"), "0")
+
+    def test_ratelimit_headers_absent_when_the_limiter_is_disabled(self):
+        """A disabled limiter must not advertise a limit of 0 — that reads as
+        "you may never call this API"."""
+        LIMITER.configure(0, 60)
+        try:
+            _status, headers, _body = self.get(
+                "/v1/models", headers={"Authorization": "Bearer sk-test"})
+            for name in headers:
+                self.assertNotIn("ratelimit", name.lower())
+        finally:
+            LIMITER.configure(3, 60)
+
+
+class SecurityHeaderTests(ServerTestCase):
+    """Every response carries the headers that close off whole bug classes.
+
+    These are one-liners in the handler and cost nothing per request; they are
+    the difference between "a misconfigured client can sniff a JSON response
+    into HTML" and not, and they are standard enough that their absence shows
+    up in any security scan of the deployment.
+    """
+
+    def test_every_response_has_nosniff_and_referrer_policy(self):
+        self.CONFIG["api_keys"] = ["sk-test"]
+        html = {"Accept": "text/html"}
+        cases = [
+            ("JSON 200", self.get_json("/health"), 200),
+            ("HTML 200", self.get("/", headers=html), 200),
+            ("JSON 404", self.get("/no-such-path"), 404),
+            ("JSON 401", self.get("/v1/models"), 401),
+        ]
+        for label, (status, headers, _body), expected in cases:
+            with self.subTest(response=label):
+                self.assertEqual(status, expected)
+                self.assertEqual(headers.get("X-Content-Type-Options"), "nosniff")
+                self.assertEqual(headers.get("Referrer-Policy"), "no-referrer")
+
+    def test_streaming_responses_have_the_headers_too(self):
+        with mock.patch("gemini_web2api.server.generate_stream",
+                        return_value=iter(["hi"])):
+            status, headers, _body = self.post("/v1/chat/completions", {
+                "model": "gemini-3.6-flash",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": True})
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get("X-Content-Type-Options"), "nosniff")
+        self.assertEqual(headers.get("Referrer-Policy"), "no-referrer")
+
+    def test_dashboard_has_csp_and_frame_denial(self):
+        _status, headers, body = self.get("/", headers={"Accept": "text/html"})
+        csp = headers.get("Content-Security-Policy") or ""
+        self.assertEqual(headers.get("X-Frame-Options"), "DENY")
+        # The dashboard is one self-contained page: inline script and styles,
+        # a data:-URI favicon, same-origin fetches. Everything else is denied.
+        for directive in ("default-src 'none'", "script-src 'unsafe-inline'",
+                          "style-src 'unsafe-inline'", "img-src data:",
+                          "connect-src 'self'", "base-uri 'none'",
+                          "frame-ancestors 'none'"):
+            self.assertIn(directive, csp)
+        self.assertNotIn("http://", csp)
+        self.assertNotIn("https://", csp)
+
+    def test_csp_covers_what_the_page_actually_uses(self):
+        """Guard against a future template change outgrowing the policy.
+
+        The page must keep working under its own CSP: inline <script>/<style>
+        (script-src/style-src 'unsafe-inline'), a data: favicon (img-src data:),
+        and same-origin fetches (connect-src 'self'). If the template ever loads
+        an external resource, this test fails before a browser reports it.
+        """
+        _status, _headers, body = self.get("/", headers={"Accept": "text/html"})
+        self.assertIn("<style>", body)
+        self.assertIn("<script>", body)
+        self.assertIn('href="data:', body)
+        self.assertIn("fetch(", body)
+
+    def test_json_responses_have_no_html_headers(self):
+        """CSP/X-Frame-Options belong to the HTML page only.
+
+        Sending them on API responses would be harmless but noisy, and a CSP
+        on a JSON body is meaningless — the point of scoping it is that the
+        policy matches the content it protects.
+        """
+        _status, headers, _body = self.get_json("/health")
+        self.assertIsNone(headers.get("Content-Security-Policy"))
+        self.assertIsNone(headers.get("X-Frame-Options"))
 
 
 class InformationLeakTests(ServerTestCase):

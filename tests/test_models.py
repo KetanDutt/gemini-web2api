@@ -147,6 +147,16 @@ class ListingTests(unittest.TestCase):
     def test_google_detail_for_unknown_model(self):
         self.assertIsNone(google_model_detail("nope"))
 
+    def test_listings_are_cached(self):
+        """GET /v1/models is the endpoint clients poll; it must not rebuild
+        the table per call. Identity is the proof — the table is static."""
+        self.assertIs(model_list(), model_list())
+        self.assertIs(google_model_list(), google_model_list())
+        self.assertIs(google_model_detail("gemini-3.6-flash"),
+                      google_model_detail("gemini-3.6-flash"))
+        # A cached miss is cached too, so an unknown model does not rescan.
+        self.assertIs(google_model_detail("nope"), google_model_detail("nope"))
+
 
 if __name__ == "__main__":
     unittest.main()

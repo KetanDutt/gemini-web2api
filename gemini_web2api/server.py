@@ -56,6 +56,26 @@ _PUBLIC_PATHS = frozenset({
 
 _EMPTY_COMPLETION = "I apologize, but I was unable to generate a response. Please try again."
 
+# The dashboard is one self-contained page: inline script, inline styles, a
+# data:-URI favicon and same-origin fetches. 'unsafe-inline' is unavoidable
+# without a per-render nonce (the page is a single template string), and it is
+# safe here because every interpolated value is escaped — that contract is
+# executed under Node by the test suite, not just asserted. What the policy
+# still buys is the important half: no external script/style/font/image loads
+# (an injected tag cannot exfiltrate anything to a third party), no <base>
+# hijack, no form posts elsewhere, and no framing of the console by another
+# page (clickjacking).
+_DASHBOARD_CSP = (
+    "default-src 'none'; "
+    "script-src 'unsafe-inline'; "
+    "style-src 'unsafe-inline'; "
+    "img-src data:; "
+    "connect-src 'self'; "
+    "base-uri 'none'; "
+    "form-action 'self'; "
+    "frame-ancestors 'none'"
+)
+
 
 def _usage(prompt, text):
     """Approximate token counts.
@@ -143,7 +163,24 @@ class GeminiHandler(BaseHTTPRequestHandler):
         # Set by the handlers so request history can attribute a model without
         # the recorder having to re-parse the body.
         self._model_name = None
+        # Rate-limit response headers, filled by _check_rate_limit for API
+        # paths and merged into whatever response is sent.
+        self._rate_limit_headers = {}
         super().__init__(*args, **kwargs)
+
+    def send_response(self, code, message=None):
+        """Send the status line plus the headers every response should carry.
+
+        ``X-Content-Type-Options`` and ``Referrer-Policy`` are cheap, apply to
+        JSON and HTML alike, and close off whole bug classes (MIME sniffing,
+        URL leakage through Referer). Going through ``send_response`` rather
+        than the individual send helpers also covers the stock error pages
+        ``BaseHTTPRequestHandler.send_error`` writes for malformed requests,
+        which never pass through this class's own helpers.
+        """
+        super().send_response(code, message)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
 
     def log_message(self, fmt, *args):
         client_ip = self.client_address[0] if self.client_address else "-"
@@ -182,7 +219,9 @@ class GeminiHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         for key, value in self._cors_headers().items():
             self.send_header(key, value)
-        for key, value in (extra_headers or {}).items():
+        # Rate-limit headers first so an explicit extra (Retry-After on a 429)
+        # can override them.
+        for key, value in {**self._rate_limit_headers, **(extra_headers or {})}.items():
             self.send_header(key, value)
         self.end_headers()
         try:
@@ -198,6 +237,11 @@ class GeminiHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        # The console must not be framable (clickjacking) and must not load
+        # anything off-origin; see _DASHBOARD_CSP above for what the policy
+        # still permits.
+        self.send_header("Content-Security-Policy", _DASHBOARD_CSP)
+        self.send_header("X-Frame-Options", "DENY")
         for key, value in self._cors_headers().items():
             self.send_header(key, value)
         self.end_headers()
@@ -234,15 +278,13 @@ class GeminiHandler(BaseHTTPRequestHandler):
         """
         return not (CONFIG.get("api_keys") or []) or self._authorized()
 
-    def send_error_json(self, status, message, err_type="invalid_request_error", code=None, param=None):
+    def send_error_json(self, status, message, err_type="invalid_request_error", code=None,
+                        param=None, extra_headers=None):
         """Emit an error in the shape OpenAI clients expect."""
         payload = {"error": {"message": message, "type": err_type, "code": code, "param": param}}
-        extra = {"WWW-Authenticate": 'Bearer realm="gemini-web2api"'} if status == 401 else None
-        self.send_json(payload, status, extra_headers=extra)
-
-    # Kept as a thin alias so the Google-native path can reuse the same shape.
-    def _send_error(self, status, message, err_type="invalid_request_error", code=None):
-        self.send_error_json(status, message, err_type, code)
+        headers = {"WWW-Authenticate": 'Bearer realm="gemini-web2api"'} if status == 401 else {}
+        headers.update(extra_headers or {})
+        self.send_json(payload, status, extra_headers=headers or None)
 
     def _record(self, status):
         """Count a response. Idempotent per request: the first status wins.
@@ -437,16 +479,31 @@ class GeminiHandler(BaseHTTPRequestHandler):
         return self._presented_key() or (self.client_address[0] if self.client_address else "unknown")
 
     def _check_rate_limit(self):
-        allowed, retry_after, _remaining = LIMITER.check(self._rate_limit_key())
+        if not LIMITER.enabled:
+            return True
+        allowed, retry_after, remaining, reset_sec = LIMITER.check(self._rate_limit_key())
+        limit = int(CONFIG.get("rate_limit_max") or 0)
+        window = int(CONFIG.get("rate_limit_window_sec") or 60)
+        # OpenAI-compatible rate-limit headers, so a client can back off
+        # without parsing the error body. Sent on success and on the 429
+        # alike; the limiter computed all three, so not sending them threw
+        # away the one piece of information a well-behaved client needs.
+        self._rate_limit_headers = {
+            "X-RateLimit-Limit-Requests": str(limit),
+            "X-RateLimit-Remaining-Requests": str(remaining),
+            "X-RateLimit-Reset-Requests": f"{reset_sec}s",
+        }
         if allowed:
             return True
         inc("rate_limited")
         self.send_error_json(
             429,
-            f"rate limit exceeded ({CONFIG.get('rate_limit_max')} requests / "
-            f"{CONFIG.get('rate_limit_window_sec')}s)",
+            f"rate limit exceeded ({limit} requests / {window}s)",
             err_type="rate_limit_error",
             code="rate_limit_exceeded",
+            # Standard HTTP hint, in seconds, matching the limiter's own
+            # retry_after — the same number the headers below imply.
+            extra_headers={"Retry-After": str(retry_after)},
         )
         return False
 
@@ -454,6 +511,10 @@ class GeminiHandler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         try:
+            # A CORS preflight never carries a body, but any request can: an
+            # unread body on a keep-alive connection desynchronises the next
+            # one, so drain it like the other verbs do.
+            self._drain_body()
             self.send_response(204)
             self.send_header("Access-Control-Allow-Origin", CONFIG.get("cors_origin", "*"))
             self.send_header("Access-Control-Allow-Methods", "GET, POST, HEAD, OPTIONS")
@@ -690,8 +751,13 @@ class GeminiHandler(BaseHTTPRequestHandler):
         inc("upstream_failures")
         status = getattr(exc, "status", None)
         if status == 429:
+            # The account that was tried is cooling down for cookie_cooldown_sec
+            # (or the anonymous path simply has to wait out Google's limit), so
+            # that duration is the honest Retry-After to hand the client.
+            retry_after = str(int(CONFIG.get("cookie_cooldown_sec") or 60))
             self.send_error_json(429, f"upstream rate limited: {exc}", "api_error",
-                                 "upstream_rate_limited")
+                                 "upstream_rate_limited",
+                                 extra_headers={"Retry-After": retry_after})
             return
         if status == 405:
             self.send_error_json(502,
@@ -766,7 +832,23 @@ class GeminiHandler(BaseHTTPRequestHandler):
 
         tools = req.get("tools")
         tool_choice = req.get("tool_choice", "auto")
-        prompt, images = messages_to_prompt(req.get("messages", []), tools, tool_choice)
+        # Validated before use: a string `messages` used to be iterated
+        # character by character (each letter became a prompt line and the
+        # request went upstream as garbage), and a non-list such as an int
+        # raised TypeError and surfaced as a 500. Both are client errors.
+        messages = req.get("messages", [])
+        if not isinstance(messages, list):
+            self.send_error_json(400, "'messages' must be an array of message objects",
+                                 "invalid_request_error", "invalid_messages")
+            return
+        # Same for stream_options: `(req.get("stream_options") or {}).get(...)`
+        # assumed a dict and turned `"stream_options": "yes"` into a 500.
+        stream_options = req.get("stream_options")
+        if stream_options is not None and not isinstance(stream_options, dict):
+            self.send_error_json(400, "'stream_options' must be an object",
+                                 "invalid_request_error", "invalid_stream_options")
+            return
+        prompt, images = messages_to_prompt(messages, tools, tool_choice)
         if not prompt.strip():
             self.send_error_json(400, "empty prompt: 'messages' produced no content",
                                  "invalid_request_error", "empty_prompt")
@@ -779,7 +861,7 @@ class GeminiHandler(BaseHTTPRequestHandler):
             prompt += "\n\n" + jsonmode.instruction_for(json_spec)
 
         stream = bool(req.get("stream", False))
-        include_usage = bool((req.get("stream_options") or {}).get("include_usage"))
+        include_usage = bool((stream_options or {}).get("include_usage"))
         cid = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
         file_refs, error = self._prepare_images(images)
@@ -1342,7 +1424,6 @@ class GeminiHandler(BaseHTTPRequestHandler):
     # ─── status payloads ─────────────────────────────────────────────────────
 
     def _health_payload(self):
-        from .metrics import snapshot as metrics_snapshot
         metrics = metrics_snapshot()
         warnings = self._startup_warnings()
         return {
@@ -1398,7 +1479,6 @@ class GeminiHandler(BaseHTTPRequestHandler):
         return payload
 
     def _dashboard_state(self):
-        from .metrics import snapshot as metrics_snapshot
         metrics = metrics_snapshot()
         config = config_snapshot()
         keys = CONFIG.get("api_keys") or []

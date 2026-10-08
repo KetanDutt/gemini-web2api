@@ -111,6 +111,27 @@ without bound. Expired keys are swept every 30 s and whenever the table exceeds
 10 000 entries, so a long-lived process does not accumulate state for clients
 that never return.
 
+A limited response is a 429 with `Retry-After` (seconds) plus the
+`X-RateLimit-Limit-Requests` / `X-RateLimit-Remaining-Requests` /
+`X-RateLimit-Reset-Requests` trio, so well-behaved clients back off on their
+own instead of hammering. See [API.md](API.md#rate-limit-headers).
+
+### Response security headers
+
+Every response carries `X-Content-Type-Options: nosniff` (a JSON body cannot be
+sniffed into HTML) and `Referrer-Policy: no-referrer` (no URL leakage through
+`Referer`). The dashboard additionally sends `X-Frame-Options: DENY` and a
+Content-Security-Policy of `default-src 'none'` with `unsafe-inline`
+script/style, `img-src data:`, `connect-src 'self'`, `base-uri 'none'`,
+`form-action 'self'` and `frame-ancestors 'none'` — no external origin may be
+loaded, framed, posted to or used as a `<base>`. The page is one
+self-contained document (inline script and styles, a `data:` favicon,
+same-origin fetches) and every interpolated value is escaped, which is what
+makes `unsafe-inline` safe here; the test suite executes that escaping under
+Node rather than trusting it. The headers are set in `send_response`, so they
+also cover the stock error pages the base HTTP server writes for malformed
+requests, which never pass through the application's own send helpers.
+
 ### No secrets in responses or logs
 
 * `/status` returns a **redacted** config: `api_keys` becomes `"2 configured"`,
