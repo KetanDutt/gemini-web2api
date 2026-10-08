@@ -3,7 +3,6 @@
   "host": "0.0.0.0",
   "api_keys": [],
   "default_model": "gemini-3.6-flash",
-
   "cookie_file": null,
   "cookie_files": [],
   "cookie_cooldown_sec": 60,
@@ -12,12 +11,11 @@
   "gemini_bl": "boq_assistant-bard-web-server_20260716.08_p0",
   "auto_update_bl": true,
   "temporary_chats": false,
-
   "proxy": null,
   "retry_attempts": 3,
   "retry_delay_sec": 2,
   "request_timeout_sec": 180,
-
+  "connect_timeout_sec": 10,
   "log_requests": true,
   "strict_models": false,
   "block_private_image_urls": true,

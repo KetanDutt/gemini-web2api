@@ -4,11 +4,16 @@ Talks to the same endpoint the Gemini web app uses and converts between that
 internal protobuf-like framing and plain text. Two transports are supported:
 
 * ``httpx`` — real incremental streaming plus connection pooling/keep-alive.
-* ``urllib`` — dependency-free fallback; streaming is buffered and delivered as
-  a single chunk.
+* ``http.client`` — dependency-free fallback with the same two properties: a
+  small pool of persistent connections (``urllib.request.urlopen`` opens and
+  closes one per call, paying DNS + TCP + TLS every time) and incremental
+  reads, so the first token reaches the client instead of the whole reply
+  arriving at once. ``urlopen`` is still used for the rare build-tag scrape.
 """
+import base64
 import contextlib
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -92,6 +97,20 @@ def _get_ssl_ctx():
     return _ssl_ctx
 
 
+def _timeouts():
+    """``(connect, read)`` seconds, from config, in a sane relationship.
+
+    The two are separate on purpose. A read timeout has to be generous — a
+    thinking model can legitimately take minutes — but applying that same
+    number to the handshake means a black-holed route keeps a request hanging
+    for three minutes before anything can be retried. Ten seconds to connect,
+    as much as the model needs to answer.
+    """
+    read = max(1.0, float(CONFIG.get("request_timeout_sec", 180) or 180))
+    connect = max(1.0, float(CONFIG.get("connect_timeout_sec", 10) or 10))
+    return min(connect, read), read
+
+
 def _get_httpx_client():
     """Return a process-wide pooled httpx client.
 
@@ -104,13 +123,14 @@ def _get_httpx_client():
         return None
     if _httpx_client is not None:
         return _httpx_client
+    connect, read = _timeouts()
     with _client_lock:
         if _httpx_client is None:
             proxy = CONFIG.get("proxy")
             transport = httpx.HTTPTransport(proxy=proxy, retries=0) if proxy else None
             _httpx_client = httpx.Client(
                 transport=transport,
-                timeout=CONFIG.get("request_timeout_sec", 180),
+                timeout=httpx.Timeout(connect=connect, read=read, write=read, pool=connect),
                 verify=True,
                 # We set Origin/Referer/User-Agent explicitly per request.
                 trust_env=not proxy,
@@ -119,13 +139,14 @@ def _get_httpx_client():
 
 
 def close_client():
-    """Release the pooled client. Used at shutdown and by tests."""
+    """Release the pooled clients. Used at shutdown and by tests."""
     global _httpx_client
     with _client_lock:
         client, _httpx_client = _httpx_client, None
     if client is not None:
         with contextlib.suppress(Exception):  # pragma: no cover - best effort
             client.close()
+    _keepalive.close_all()
 
 
 # ─── Cookie / auth ───────────────────────────────────────────────────────────
@@ -709,8 +730,369 @@ def extract_response_text(raw):
 
 # ─── Transports ──────────────────────────────────────────────────────────────
 
+# Errors that mean "this socket is gone", raised by http.client when a pooled
+# connection was closed by the far end while it sat idle. They are only ever
+# raised before a response has been read, which is what makes one retry on a
+# fresh socket safe for a POST: the request never reached the server.
+_STALE_CONNECTION_ERRORS = (
+    http.client.RemoteDisconnected,
+    http.client.BadStatusLine,
+    http.client.CannotSendRequest,
+    http.client.ResponseNotReady,
+    ConnectionResetError,
+    BrokenPipeError,
+    ConnectionAbortedError,
+)
+
+
+class _StdlibStatusError(Exception):
+    """An error status from the stdlib transport.
+
+    Carries the same two attributes ``_describe_http_error`` reads off httpx's
+    ``HTTPStatusError`` (``status_code`` and ``response``), so a 429 produces
+    the same message — upstream body included — on both transports.
+    """
+
+    def __init__(self, response):
+        super().__init__(f"HTTP {response.status_code}")
+        self.response = response
+        self.status_code = response.status_code
+
+
+class _KeepAlivePool:
+    """Persistent ``http.client`` connections for the stdlib transport.
+
+    ``urlopen`` opens a connection, sends, reads and closes: DNS + TCP + TLS
+    before every single call. Against a local stand-in upstream, five requests
+    cost five connections. This keeps them instead and hands one back once its
+    response has been read in full, which is where the handshake goes.
+
+    Idle connections are expired rather than trusted: the far end may close one
+    whenever it likes, and a stale socket is indistinguishable from a healthy
+    one until it is used. ``_STALE_CONNECTION_ERRORS`` covers that race with a
+    single retry on a fresh connection.
+    """
+
+    #: How long a connection may sit unused before it is not worth trusting.
+    IDLE_SECONDS = 90
+    #: Connections kept per (scheme, host, port, proxy) key.
+    MAX_IDLE = 8
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._idle = {}
+
+    def take(self, key):
+        """Return a pooled connection for ``key``, or ``None``."""
+        now = time.monotonic()
+        with self._lock:
+            sockets = self._idle.get(key)
+            while sockets:
+                connection, returned_at = sockets.pop()
+                if now - returned_at <= self.IDLE_SECONDS:
+                    return connection
+                _close_quietly(connection)
+        return None
+
+    def give(self, key, connection):
+        """Return a fully-read connection to the pool for reuse."""
+        with self._lock:
+            sockets = self._idle.setdefault(key, [])
+            sockets.append((connection, time.monotonic()))
+            while len(sockets) > self.MAX_IDLE:
+                _close_quietly(sockets.pop(0)[0])
+
+    def close_all(self):
+        with self._lock:
+            sockets, self._idle = self._idle, {}
+        for entries in sockets.values():
+            for connection, _returned_at in entries:
+                _close_quietly(connection)
+
+    def idle_count(self):
+        """How many connections are held. For tests and diagnostics."""
+        with self._lock:
+            return sum(len(entries) for entries in self._idle.values())
+
+
+_keepalive = _KeepAlivePool()
+
+
+def _close_quietly(connection):
+    with contextlib.suppress(Exception):
+        connection.close()
+
+
+def _connection_key(target):
+    """Identify a connection by what it connects *to*, proxy included.
+
+    A change of proxy or host must not reuse the previous tunnel, so both are
+    part of the key rather than assumed to be constant.
+    """
+    scheme, host, port, proxy = target
+    return (scheme, host, port, proxy)
+
+
+def _connection_target(url):
+    """Split ``url`` into ``(scheme, host, port, proxy_url)``."""
+    parts = urllib.parse.urlsplit(url)
+    scheme = (parts.scheme or "https").lower()
+    host = parts.hostname
+    if not host:
+        raise ValueError(f"upstream URL has no host: {url!r}")
+    port = parts.port or (443 if scheme == "https" else 80)
+    return scheme, host, port, CONFIG.get("proxy")
+
+
+def _proxy_parts(proxy_url):
+    """``(host, port, authorization_header)`` for a proxy URL."""
+    parts = urllib.parse.urlsplit(proxy_url if "://" in proxy_url else "http://" + proxy_url)
+    host = parts.hostname or ""
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    header = None
+    if parts.username:
+        raw = f"{urllib.parse.unquote(parts.username)}:{urllib.parse.unquote(parts.password or '')}"
+        header = "Basic " + base64.b64encode(raw.encode()).decode()
+    return host, port, header
+
+
+def _connect(target):
+    """Open (or take) a connection ready to send, with both timeouts applied.
+
+    Connecting happens here rather than lazily inside ``request()`` so the
+    handshake is bounded by the *connect* timeout; the socket is then given the
+    (longer) read timeout, which is what the response needs.
+    """
+    connect_timeout, read_timeout = _timeouts()
+    scheme, host, port, proxy = target
+    key = _connection_key(target)
+    connection = _keepalive.take(key)
+    if connection is None:
+        ctx = _get_ssl_ctx() if scheme == "https" else None
+        if proxy:
+            proxy_host, proxy_port, _auth = _proxy_parts(proxy)
+            if scheme == "https":
+                connection = http.client.HTTPSConnection(
+                    proxy_host, proxy_port, timeout=connect_timeout, context=ctx)
+                connection.set_tunnel(host, port)
+            else:
+                connection = http.client.HTTPConnection(
+                    proxy_host, proxy_port, timeout=connect_timeout)
+        elif scheme == "https":
+            connection = http.client.HTTPSConnection(
+                host, port, timeout=connect_timeout, context=ctx)
+        else:
+            connection = http.client.HTTPConnection(host, port, timeout=connect_timeout)
+        connection.connect()
+    if connection.sock is not None:
+        connection.sock.settimeout(read_timeout)
+    return key, connection
+
+
+class _StdlibResponse:
+    """An ``http.client`` response wearing the part of the httpx surface we use.
+
+    ``generate()`` and ``generate_stream()`` read ``status_code``, ``text``,
+    ``read()``, ``iter_text()`` and ``raise_for_status()``, and the retry loop
+    catches a status error. Adapting the stdlib response to that surface (rather
+    than teaching the callers about a second kind of response) keeps one retry
+    path, one set of rotation rules and one delta-tracking implementation.
+    """
+
+    __slots__ = ("status_code", "headers", "_response", "_key", "_connection", "_body")
+
+    def __init__(self, response, key, connection):
+        self.status_code = response.status
+        self.headers = response.headers
+        self._response = response
+        self._key = key
+        self._connection = connection
+        self._body = b""
+
+    # -- reading ---------------------------------------------------------
+    def read(self):
+        """Read the whole body, then release the connection for reuse."""
+        if not self._body:
+            self._body = self._response.read() or b""
+        return self._body
+
+    def iter_text(self):
+        """Yield decoded text as it arrives.
+
+        ``read1`` performs at most one underlying read, so a chunk is handed
+        over as soon as the socket has one instead of waiting for a buffer to
+        fill or for the response to end. That is the difference between the
+        first token arriving immediately and arriving with the last one.
+        """
+        response = self._response
+        while True:
+            chunk = response.read1(65536)
+            if not chunk:
+                break
+            yield chunk.decode("utf-8", errors="replace")
+        self._settle()
+
+    def _settle(self):
+        """Finish the response so its connection can be reused.
+
+        A length-delimited body ends with ``read1`` returning an empty string
+        *without* closing the response, and ``http.client`` refuses to reuse a
+        connection whose previous response has not reported itself closed. The
+        public way to say "this body is finished" is a zero-length read, which
+        is what makes the difference between a pooled connection and a fresh
+        handshake on every request. A chunked body closes itself as its
+        terminating chunk is parsed, and a connection-delimited one cannot be
+        reused at all, so this only matters for ``Content-Length``.
+        """
+        response = self._response
+        with contextlib.suppress(Exception):
+            if not response.isclosed() and response.length == 0:
+                response.read(0)
+
+    @property
+    def text(self):
+        return self.read().decode("utf-8", errors="replace")
+
+    # -- control ---------------------------------------------------------
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            # Read the body first: httpx does the same, and the error message
+            # is built from it. Without this the caller would see a bare
+            # "HTTP 429" where the httpx path shows Google's own explanation.
+            with contextlib.suppress(Exception):
+                self.read()
+            raise _StdlibStatusError(self)
+
+    def close(self):
+        """Hand the connection back when the body was fully consumed.
+
+        Two conditions have to hold before the socket is worth keeping: the
+        server did not say it is closing (``will_close``), and the body was
+        actually read to the end (``isclosed``). A response abandoned halfway —
+        a client disconnecting, or a read timeout — leaves unread bytes in the
+        socket, and reusing it would parse the tail of the last reply as the
+        head of the next one.
+        """
+        response = self._response
+        reusable = (getattr(response, "will_close", True) is False
+                    and getattr(response, "isclosed", lambda: False)())
+        with contextlib.suppress(Exception):
+            response.close()
+        if reusable:
+            # The *connection* goes back to the pool, not the response: the
+            # response has been consumed and is done with.
+            _keepalive.give(self._key, self._connection)
+        else:
+            _close_quietly(self._connection)
+
+    # -- context manager -------------------------------------------------
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.close()
+        return False
+
+
+class _StdlibStream:
+    """Opens a request on a pooled connection and yields its response.
+
+    One retry on a *fresh* connection covers the keep-alive race: a pooled
+    socket the far end closed while idle fails immediately, and because that
+    happens before any response byte is read, sending the request again is safe
+    even though it is a POST.
+    """
+
+    __slots__ = ("_url", "_body", "_headers", "_response")
+
+    def __init__(self, url, body, headers):
+        self._url = url
+        self._body = body
+        self._headers = headers
+        self._response = None
+
+    def _send(self):
+        target = _connection_target(self._url)
+        scheme, _host, _port, proxy = target
+        key, connection = _connect(target)
+        path = urllib.parse.urlsplit(self._url)
+        # Through a proxy an HTTP request carries the absolute URL; an HTTPS one
+        # is tunnelled, so it carries the path.
+        address = self._url if (proxy and scheme == "http") else (
+            path.path + (f"?{path.query}" if path.query else "")) or "/"
+        headers = dict(self._headers)
+        # httpx decompresses transparently; http.client does not, so bytes that
+        # arrived gzipped would be handed to the frame parser as garbage. Ask
+        # for the bytes as they are — the framing is JSON text either way.
+        headers.setdefault("Accept-Encoding", "identity")
+        if proxy and scheme == "http":
+            _proxy_host, _proxy_port, auth = _proxy_parts(proxy)
+            if auth:
+                headers["Proxy-Authorization"] = auth
+        try:
+            connection.request("POST", address, body=self._body, headers=headers)
+            return key, connection, connection.getresponse()
+        except _STALE_CONNECTION_ERRORS:
+            _close_quietly(connection)
+            raise
+
+    def __enter__(self):
+        try:
+            key, connection, response = self._send()
+        except _STALE_CONNECTION_ERRORS:
+            # The pooled socket was closed under us; the request never left.
+            key, connection, response = self._send()
+        self._response = _StdlibResponse(response, key, connection)
+        return self._response
+
+    def __exit__(self, *exc_info):
+        # Closing the response is what returns the connection to the pool; a
+        # stream that is merely abandoned would leak a socket per request.
+        if self._response is not None:
+            self._response.close()
+        self._response = None
+        return False
+
+
+def _open_stream(body, headers, url, client):
+    """Return a context manager yielding a response, on either transport."""
+    if client is not None:
+        return client.stream("POST", url, content=body, headers=headers)
+    return _StdlibStream(url, body, headers)
+
+
+def preconnect():
+    """Open one upstream connection ahead of the first request.
+
+    A cold connection costs DNS + TCP + TLS — a few hundred milliseconds on a
+    good day, and the client pays it as time-to-first-byte because the request
+    cannot be sent until the socket is ready. Doing it once at startup means
+    the first caller after a restart gets the latency of a warm process. The
+    connection carries no request, and every failure is swallowed: a server
+    that cannot reach the internet yet must still start and report why.
+
+    Returns True when a connection is ready for reuse.
+    """
+    try:
+        target = _connection_target(_get_url())
+        _connect_timeout, read_timeout = _timeouts()
+        key, connection = _connect(target)
+        with contextlib.suppress(Exception):
+            connection.sock.settimeout(read_timeout)
+        _keepalive.give(key, connection)
+        log("Upstream connection pre-established", "debug")
+        return True
+    except Exception as exc:
+        log(f"Preconnect failed (will connect on demand): {exc}", "debug")
+        return False
+
+
 def _urlopen(req, timeout=None):
-    """urllib request honouring the configured proxy and shared SSL context."""
+    """urllib request honouring the configured proxy and shared SSL context.
+
+    Kept for the build-tag scrape, which runs once per rollout rather than once
+    per request and does not benefit from a pooled connection.
+    """
     timeout = timeout or CONFIG.get("request_timeout_sec", 180)
     proxy = CONFIG.get("proxy")
     ctx = _get_ssl_ctx()
@@ -758,12 +1140,25 @@ def _describe_http_error(exc):
     return (f"HTTP {status} — {body}" if body else f"HTTP {status}"), status
 
 
-# httpx raises HTTPStatusError; urllib raises HTTPError. Collect whichever exist
-# so the retry logic below stays readable and works without httpx installed.
-_HTTP_ERRORS = [urllib.error.HTTPError]
+# httpx raises HTTPStatusError; urllib raises HTTPError; the stdlib transport
+# raises _StdlibStatusError. Collect whichever exist so the retry logic below
+# stays readable, works without httpx installed, and treats a 429 the same way
+# on every transport.
+_HTTP_ERRORS = [urllib.error.HTTPError, _StdlibStatusError]
 if HAS_HTTPX:
     _HTTP_ERRORS.append(httpx.HTTPStatusError)
 _HTTP_ERRORS = tuple(_HTTP_ERRORS)
+
+# Errors that must never buy an account a cooldown. `_rotate` is only reached
+# for statuses the pool recognises as "this account", but a transport failure
+# has no status at all, so it is named here and checked where it matters.
+_TRANSPORT_ERRORS = [urllib.error.URLError, ssl.SSLError, OSError,
+                     http.client.HTTPException]
+if HAS_HTTPX:
+    # ConnectError, RemoteProtocolError, ReadTimeout, ...: the request never
+    # produced a response, so it can be repeated at once.
+    _TRANSPORT_ERRORS.append(httpx.TransportError)
+_TRANSPORT_ERRORS = tuple(_TRANSPORT_ERRORS)
 
 
 def _next_credential():
@@ -832,10 +1227,15 @@ def generate(prompt, model_id, think_mode, file_refs=None, extra_fields=None):
                 resp.raise_for_status()
                 _credentials.report_success(credential)
                 return extract_response_text(resp.text)
-            req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-            raw = _urlopen(req).read().decode("utf-8", errors="replace")
-            _credentials.report_success(credential)
-            return extract_response_text(raw)
+            # No httpx: the stdlib transport, which reuses its connections.
+            with _open_stream(body, headers, url, None) as resp:
+                if resp.status_code == 405 and update_bl_if_needed():
+                    log("Retrying with refreshed bl…")
+                    last_err = GeminiUpstreamError("HTTP 405 from upstream", status=405)
+                    continue
+                resp.raise_for_status()
+                _credentials.report_success(credential)
+                return extract_response_text(resp.text)
         except _HTTP_ERRORS as exc:
             message, status = _describe_http_error(exc)
             last_err = GeminiUpstreamError(message, status=status)
@@ -846,6 +1246,15 @@ def generate(prompt, model_id, think_mode, file_refs=None, extra_fields=None):
             if status == 405 and update_bl_if_needed():
                 log("Retrying with refreshed bl…")
                 continue
+        except _TRANSPORT_ERRORS as exc:
+            # Connecting failed or the response died mid-read. No account was
+            # refused, so nothing is cooled and nothing is rotated — and there
+            # is no reason to wait, because a DNS or TLS failure does not
+            # repair itself in two seconds. Retrying immediately turns a
+            # transient blip into a retry instead of a pause plus a retry.
+            last_err = exc
+            log(f"Transport error on attempt {attempt + 1}/{attempts}: {exc}", "warning")
+            continue
         except Exception as exc:
             last_err = exc
         if attempt < attempts - 1:
@@ -880,19 +1289,15 @@ def _iter_stream_frames(resp):
 def generate_stream(prompt, model_id, think_mode, file_refs=None, extra_fields=None):
     """Yield incremental text deltas.
 
-    Without ``httpx`` this falls back to a buffered request and yields the whole
-    answer once. Deltas are cumulative-safe: a frame that repeats or extends
-    what was already emitted produces only the new suffix, and a frame that
-    belongs to a *different* part is emitted in full rather than treated as a
-    corruption (the old code raised "stream content changed during retry" here,
-    which killed the response after the client had already received 200 OK).
+    Both transports stream: httpx reads through its own pool, the stdlib path
+    through ``_StdlibStream``, which keeps its connections alive and hands each
+    network chunk over as it lands. Deltas are cumulative-safe: a frame that
+    repeats or extends what was already emitted produces only the new suffix,
+    and a frame that belongs to a *different* part is emitted in full rather
+    than treated as a corruption (the old code raised "stream content changed
+    during retry" here, which killed the response after the client had already
+    received 200 OK).
     """
-    if not HAS_HTTPX:
-        text = generate(prompt, model_id, think_mode, file_refs, extra_fields)
-        if text:
-            yield text
-        return
-
     client = _get_httpx_client()
     attempts = max(1, int(CONFIG.get("retry_attempts", 3)))
     delay = CONFIG.get("retry_delay_sec", 2)
@@ -919,7 +1324,7 @@ def generate_stream(prompt, model_id, think_mode, file_refs=None, extra_fields=N
         headers = _build_headers(credential)
         url = _get_url(credential=credential)
         try:
-            with client.stream("POST", url, content=body, headers=headers) as resp:
+            with _open_stream(body, headers, url, client) as resp:
                 if resp.status_code == 405:
                     resp.read()
                     if update_bl_if_needed():
@@ -964,6 +1369,14 @@ def generate_stream(prompt, model_id, think_mode, file_refs=None, extra_fields=N
                 # before rotating, because a rotation is still a retry.
                 log(f"Stream failed after {len(emitted)} chars: {last_err}", "error")
                 raise last_err from None
+            if status is None and isinstance(exc, _TRANSPORT_ERRORS):
+                # The socket never produced a response, so this attempt can be
+                # repeated at once: nothing was answered and nothing was
+                # refused. A stale pooled connection lands here and succeeds on
+                # the next attempt instead of costing the client a retry delay.
+                log(f"Stream transport error on attempt {attempt + 1}/{attempts}: {exc}",
+                    "warning")
+                continue
             if status is not None and _rotate(credential, status, message):
                 credential = _next_credential()
                 continue

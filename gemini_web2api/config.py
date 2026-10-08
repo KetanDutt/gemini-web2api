@@ -24,6 +24,11 @@ DEFAULT_CONFIG = {
     "retry_attempts": 3,
     "retry_delay_sec": 2,
     "request_timeout_sec": 180,
+    # How long to wait for the TCP+TLS handshake, separately from the read
+    # timeout above. A black-holed connect used to burn the whole read timeout
+    # (three minutes) before the request could even be retried; failing fast is
+    # most of the difference between a slow reply and an error the client sees.
+    "connect_timeout_sec": 10,
     "gemini_bl": "boq_assistant-bard-web-server_20260716.08_p0",
     "auth_user": None,
     "xsrf_token": None,
@@ -203,6 +208,12 @@ def _validate():
     if CONFIG.get("request_timeout_sec", 0) <= 0:
         _warn("config: request_timeout_sec must be > 0, using 180")
         CONFIG["request_timeout_sec"] = 180
+    if CONFIG.get("connect_timeout_sec", 0) <= 0:
+        _warn("config: connect_timeout_sec must be > 0, using 10")
+        CONFIG["connect_timeout_sec"] = 10
+    # The handshake cannot be slower than the whole request.
+    if CONFIG.get("connect_timeout_sec", 0) > CONFIG.get("request_timeout_sec", 180):
+        CONFIG["connect_timeout_sec"] = CONFIG["request_timeout_sec"]
     if CONFIG.get("max_request_bytes", 0) <= 0:
         CONFIG["max_request_bytes"] = DEFAULT_CONFIG["max_request_bytes"]
     if CONFIG.get("default_model") not in _known_models():
