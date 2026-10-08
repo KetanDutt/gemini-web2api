@@ -8,6 +8,7 @@ embedded in field ``[79]`` of the StreamGenerate payload:
 
 Thinking depth is field ``[17]``: ``0`` is the deepest, ``4`` the shallowest.
 """
+from functools import lru_cache
 
 MODE_CATEGORY = {
     1: "FAST",
@@ -130,7 +131,17 @@ def resolve_model(model_name, default=None):
 
 
 def model_list():
-    """Models in the shape OpenAI's ``GET /v1/models`` expects."""
+    """Models in the shape OpenAI's ``GET /v1/models`` expects.
+
+    Cached: the model table is static for the life of the process, and
+    ``GET /v1/models`` is the endpoint clients poll most often — rebuilding
+    nine dicts per call is pure waste on a hot path.
+    """
+    return _model_list()
+
+
+@lru_cache(maxsize=1)
+def _model_list():
     return [
         {
             "id": name,
@@ -144,7 +155,15 @@ def model_list():
 
 
 def google_model_list():
-    """Models in the shape Google's ``GET /v1beta/models`` expects."""
+    """Models in the shape Google's ``GET /v1beta/models`` expects.
+
+    Cached for the same reason as :func:`model_list`.
+    """
+    return _google_model_list()
+
+
+@lru_cache(maxsize=1)
+def _google_model_list():
     return [
         {
             "name": f"models/{name}",
@@ -157,7 +176,15 @@ def google_model_list():
 
 
 def google_model_detail(name):
-    """One model in Google's ``GET /v1beta/models/{model}`` shape."""
+    """One model in Google's ``GET /v1beta/models/{model}`` shape.
+
+    Cached: model detail is a pure function of the static table.
+    """
+    return _google_model_detail(name)
+
+
+@lru_cache(maxsize=64)
+def _google_model_detail(name):
     cfg = MODELS.get(name)
     if not cfg:
         return None

@@ -5,53 +5,135 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Gemini Cookie Sync</title>
   <style>
-    :root { color-scheme: light dark; }
-    body {
-      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-      width: 390px;
-      margin: 0;
-      padding: 16px;
-      background: Canvas;
-      color: CanvasText;
+    /* Same Liquid Glass token system as the web console, scaled to a popup. */
+    :root{
+      color-scheme:light dark;
+      --bg:#f2f3f5; --fg:#1d2129; --muted:#5b6472; --faint:#8b93a1;
+      --accent:#3e63dd; --accent-fill:#3e63dd; --accent-fg:#fff;
+      --ok:#1f7a4d; --warn:#9a6a00;
+      --surface-2:rgba(255,255,255,.72); --surface-3:rgba(255,255,255,.9);
+      --fill-1:rgba(28,39,60,.045); --fill-2:rgba(28,39,60,.085);
+      --field:rgba(18,28,48,.04);
+      --line:rgba(25,35,55,.09); --line-strong:rgba(25,35,55,.17);
+      --highlight:rgba(255,255,255,.85);
+      --ok-bg:rgba(31,122,77,.1); --ok-line:rgba(31,122,77,.32);
+      --warn-bg:rgba(154,106,0,.11); --warn-line:rgba(154,106,0,.34);
+      --neu-bg:rgba(96,106,122,.1); --neu-line:rgba(96,106,122,.24);
+      --r-sm:9px; --r-md:14px; --r-lg:18px; --r-full:999px;
+      --shadow-1:0 1px 2px rgba(15,23,42,.04),0 4px 14px rgba(15,23,42,.05);
+      --shadow-2:0 1px 3px rgba(15,23,42,.05),0 12px 30px rgba(15,23,42,.09);
+      --t-fast:150ms; --ease-out:cubic-bezier(.22,.61,.21,1);
+      --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter",system-ui,"Segoe UI",Roboto,sans-serif;
+      --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
     }
-    h1 { font-size: 17px; margin: 0 0 8px; }
-    p { font-size: 13px; line-height: 1.55; margin: 8px 0; }
-    button {
-      width: 100%;
-      padding: 10px 12px;
-      margin-top: 10px;
-      border: 0;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 14px;
+    @media (prefers-color-scheme:dark){
+      :root{
+        --bg:#0d0f12; --fg:#e7eaef; --muted:#98a2b3; --faint:#626d7d;
+        --accent:#8fabff; --accent-fill:#4a72e8; --accent-fg:#fff;
+        --ok:#4cc27e; --warn:#e0a83e;
+        --surface-2:rgba(255,255,255,.07); --surface-3:rgba(255,255,255,.11);
+        --fill-1:rgba(255,255,255,.05); --fill-2:rgba(255,255,255,.09);
+        --field:rgba(255,255,255,.055);
+        --line:rgba(255,255,255,.09); --line-strong:rgba(255,255,255,.18);
+        --highlight:rgba(255,255,255,.16);
+        --ok-bg:rgba(76,194,126,.12); --ok-line:rgba(76,194,126,.34);
+        --warn-bg:rgba(224,168,62,.12); --warn-line:rgba(224,168,62,.34);
+        --neu-bg:rgba(150,160,175,.13); --neu-line:rgba(150,160,175,.28);
+        --shadow-1:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.28);
+        --shadow-2:0 2px 4px rgba(0,0,0,.4),0 14px 34px rgba(0,0,0,.45);
+      }
     }
-    button:disabled { opacity: .55; cursor: wait; }
-    #export { background: #1769e0; color: white; }
-    #inspect, #open { background: color-mix(in srgb, CanvasText 10%, Canvas); color: CanvasText; }
-    #status {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      border-radius: 8px;
-      padding: 10px;
-      background: color-mix(in srgb, CanvasText 7%, Canvas);
-      min-height: 44px;
-      max-height: 240px;
-      overflow-y: auto;
+    *{box-sizing:border-box}
+    body{
+      font-family:var(--sans); font-size:13px; line-height:1.55;
+      width:390px; margin:0; padding:12px;
+      color:var(--fg); background:var(--bg);
+      background-image:
+        radial-gradient(420px 260px at 115% -20%, rgba(62,99,221,.09), transparent 60%),
+        radial-gradient(360px 240px at -20% 115%, rgba(148,102,222,.07), transparent 60%);
+      -webkit-font-smoothing:antialiased;
     }
-    .warn { color: #b34800; }
-    .ok { color: #17823b; }
-    code { direction: ltr; unicode-bidi: embed; }
-    .note { opacity: .78; }
+    @media (prefers-color-scheme:dark){
+      body{background-image:
+        radial-gradient(420px 260px at 115% -20%, rgba(88,118,255,.1), transparent 60%),
+        radial-gradient(360px 240px at -20% 115%, rgba(136,98,220,.08), transparent 60%)}
+    }
+    .panel{
+      background:var(--surface-2);
+      -webkit-backdrop-filter:blur(18px) saturate(170%);
+      backdrop-filter:blur(18px) saturate(170%);
+      border:1px solid var(--line); border-radius:var(--r-lg);
+      box-shadow:var(--shadow-2), inset 0 1px 0 var(--highlight);
+      padding:16px;
+    }
+    .head{display:flex; align-items:center; gap:10px; margin-bottom:4px}
+    .logo-tile{
+      width:34px; height:34px; flex:0 0 34px; border-radius:10px;
+      display:grid; place-items:center; color:var(--accent);
+      background:var(--surface-3); border:1px solid var(--line);
+      box-shadow:var(--shadow-1), inset 0 1px 0 var(--highlight);
+    }
+    .logo-tile svg{width:19px;height:19px;display:block}
+    h1{font-size:15.5px; margin:0; font-weight:650; letter-spacing:-.02em}
+    p{margin:8px 0}
+    code{
+      font-family:var(--mono); font-size:.92em; direction:ltr; unicode-bidi:embed;
+      background:var(--fill-1); border:1px solid var(--line);
+      padding:1px 5px; border-radius:6px; word-break:break-all;
+    }
+    button{
+      width:100%; padding:10px 12px; margin-top:8px;
+      border-radius:11px; cursor:pointer; font-family:inherit;
+      font-size:13.5px; font-weight:600;
+      transition:transform var(--t-fast) var(--ease-out), filter var(--t-fast) var(--ease-out),
+                 background var(--t-fast) var(--ease-out), border-color var(--t-fast) var(--ease-out),
+                 box-shadow var(--t-fast) var(--ease-out);
+    }
+    button:active{transform:scale(.985)}
+    button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+    button:disabled{opacity:.55; cursor:wait; transform:none; filter:none}
+    #export{
+      background:var(--accent-fill); color:var(--accent-fg);
+      border:1px solid transparent;
+      box-shadow:0 1px 2px rgba(15,23,42,.12), 0 8px 20px rgba(62,99,221,.22),
+                 inset 0 1px 0 rgba(255,255,255,.25);
+    }
+    #export:hover{filter:brightness(1.07)}
+    #inspect,#open{
+      background:var(--fill-1); color:var(--fg); border:1px solid var(--line);
+    }
+    #inspect:hover,#open:hover{background:var(--fill-2); border-color:var(--line-strong)}
+    #status{
+      white-space:pre-wrap; overflow-wrap:anywhere;
+      border-radius:var(--r-md); padding:10px 12px; margin:12px 0 0;
+      background:var(--field); border:1px solid var(--line);
+      font-family:var(--mono); font-size:12px; line-height:1.6;
+      min-height:44px; max-height:240px; overflow-y:auto;
+      transition:background var(--t-fast) var(--ease-out), border-color var(--t-fast) var(--ease-out);
+    }
+    #status.ok{background:var(--ok-bg); border-color:var(--ok-line); color:var(--ok)}
+    #status.warn{background:var(--warn-bg); border-color:var(--warn-line); color:var(--warn)}
+    .note{color:var(--muted); font-size:12px; margin:10px 0 0}
+    @media (prefers-reduced-motion:reduce){
+      *{transition-duration:.01ms !important; animation-duration:.01ms !important}
+    }
   </style>
 </head>
 <body>
-  <h1>Gemini Cookie Sync</h1>
-  <p>Exports cookies, XSRF, and build metadata from the current Gemini session to <code>gemini-auth.json</code>. Nothing is sent over the network.</p>
-  <button id="open" type="button">Open Gemini</button>
-  <button id="inspect" type="button">Inspect session</button>
-  <button id="export" type="button">Export gemini-auth.json</button>
-  <p id="status">Ready.</p>
-  <p class="note">Open Gemini, sign in, then refresh the page before inspection. The generated file contains highly sensitive session data; do not share it or commit it to Git.</p>
+  <div class="panel">
+    <div class="head">
+      <span class="logo-tile" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C12.6 6.8 14.2 8.4 19 9 14.2 9.6 12.6 11.2 12 16 11.4 11.2 9.8 9.6 5 9 9.8 8.4 11.4 6.8 12 2Z"/></svg>
+      </span>
+      <h1>Gemini Cookie Sync</h1>
+    </div>
+    <p>Exports cookies, XSRF, and build metadata from the current Gemini session to <code>gemini-auth.json</code>. Nothing is sent over the network.</p>
+    <button id="open" type="button">Open Gemini</button>
+    <button id="inspect" type="button">Inspect session</button>
+    <button id="export" type="button">Export gemini-auth.json</button>
+    <p id="status">Ready.</p>
+    <p class="note">Open Gemini, sign in, then refresh the page before inspection. The generated file contains highly sensitive session data; do not share it or commit it to Git.</p>
+  </div>
   <script src="popup.js"></script>
 </body>
 </html>

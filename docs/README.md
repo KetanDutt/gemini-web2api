@@ -10,6 +10,7 @@ Start with the [project README](../README.md) for the 60-second version.
 | [API.md](API.md) | Every HTTP endpoint, with request and response examples |
 | [AUTHENTICATION.md](AUTHENTICATION.md) | Protecting the server with API keys; authenticating *to* Google with cookies, XSRF and `auth_user` |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Docker, Docker Compose, systemd, Cloudflare Workers, reverse proxies |
+| [OPERATIONS.md](OPERATIONS.md) | Day-2 running: probes, metrics, rate limiting, logging, shutdown, scaling |
 | [SECURITY.md](SECURITY.md) | Threat model, what is protected by default, and what you must decide yourself |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Symptom → cause → fix, including empty replies, HTTP 405/429, and Pro not routing |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Layout, running tests, adding a model, release checklist |

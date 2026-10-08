@@ -50,9 +50,9 @@ A trailing slash is accepted.
 | Field | Notes |
 |---|---|
 | `model` | Optional; defaults to `default_model`. Unknown names fall back to the default unless `strict_models` is set. |
-| `messages` | `system`, `developer`, `user`, `assistant`, `tool`. Content may be a string or a part list. |
+| `messages` | `system`, `developer`, `user`, `assistant`, `tool`. Content may be a string or a part list. Must be an array — any other type is a 400 `invalid_messages`. |
 | `stream` | Requires `httpx` for incremental delivery. |
-| `stream_options.include_usage` | Emits a final chunk with `choices: []` and `usage`. |
+| `stream_options.include_usage` | Emits a final chunk with `choices: []` and `usage`. `stream_options` must be an object — any other type is a 400 `invalid_stream_options`. |
 | `tools` | OpenAI function declarations. See [Tool calling](#tool-calling). |
 | `tool_choice` | `"none"`, `"auto"`, `"required"`, or `{"type":"function","function":{"name":…}}`. |
 | `response_format` | `{"type":"json_object"}` or `{"type":"json_schema",…}`. See [JSON mode](#json-mode). |
@@ -470,6 +470,8 @@ Errors follow OpenAI's shape, so client SDKs surface them properly:
 | Status | `code` | Cause |
 |---|---|---|
 | 400 | `invalid_model` | Bad `@think=` value, or unknown model with `strict_models` on |
+| 400 | `invalid_messages` | `messages` is not an array of message objects |
+| 400 | `invalid_stream_options` | `stream_options` is not an object |
 | 400 | `empty_prompt` / `empty_input` / `empty_content` | No content after conversion |
 | 400 | `image_rejected` | Image URL refused (SSRF policy) or unfetchable |
 | 401 | `invalid_api_key` | Missing or wrong key. Response includes `WWW-Authenticate`. |
@@ -477,12 +479,57 @@ Errors follow OpenAI's shape, so client SDKs surface them properly:
 | 404 | — | Unknown path |
 | 413 | `payload_too_large` | Body over `max_request_bytes` |
 | 429 | `rate_limit_exceeded` | Your rate limit; `Retry-After` is set |
-| 429 | `upstream_rate_limited` | Google is throttling |
+| 429 | `upstream_rate_limited` | Google is throttling; `Retry-After` is the credential cooldown |
 | 501 | `unsupported_endpoint` | `/v1/embeddings`, `/v1/audio/speech`, `/v1/images/generations` |
 | 502 | `stale_build_tag` | HTTP 405 upstream — the `bl` build tag is out of date |
 | 502 | `image_upload_failed` | Google rejected the image upload |
 | 502 | — | Any other upstream failure |
 | 500 | — | Unexpected internal error |
+
+---
+
+## Response headers
+
+Every response — JSON, HTML, SSE and errors alike, including the stock error
+pages the HTTP server writes for malformed requests — carries:
+
+| Header | Value | Why |
+|---|---|---|
+| `X-Content-Type-Options` | `nosniff` | Stops a browser from reinterpreting a JSON response as HTML. |
+| `Referrer-Policy` | `no-referrer` | The dashboard URL carries no secrets, but API paths never should leak one. |
+| `X-Request-Id` | 12 hex chars | Correlates one request across logs, metrics and history. |
+
+The dashboard (`GET /` with `Accept: text/html`) additionally carries:
+
+| Header | Value |
+|---|---|
+| `X-Frame-Options` | `DENY` |
+| `Content-Security-Policy` | `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'` |
+
+The CSP is deliberately strict — no external script, style, font, image or
+fetch origin is allowed — because the page is one self-contained document:
+an inline script, inline styles, a `data:` favicon and same-origin `fetch`
+calls. `unsafe-inline` is the price of that single-file design (every
+interpolated value is escaped; the escaping is executed under Node by the
+test suite), and in exchange an injected tag can neither load anything from a
+third party nor frame, hijack the base URL or post a form elsewhere.
+
+### Rate-limit headers
+
+When `rate_limit_max` is enabled, API responses carry the OpenAI-compatible
+trio so clients can pace themselves without parsing an error body:
+
+| Header | Meaning |
+|---|---|
+| `X-RateLimit-Limit-Requests` | Configured maximum (`rate_limit_max`). |
+| `X-RateLimit-Remaining-Requests` | Requests left in the current window. |
+| `X-RateLimit-Reset-Requests` | Seconds until the current window ends (e.g. `42s`). |
+
+They are present on success **and** on the 429. When the limiter is disabled
+the headers are absent entirely — a limit of `0` would read as "never
+allowed". Both 429 paths set `Retry-After` in seconds: the local limiter
+reports its own `retry_after`, and an upstream 429 reports the credential
+cooldown (`cookie_cooldown_sec`) that the failing account is sitting out.
 
 ---
 

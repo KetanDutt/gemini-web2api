@@ -41,7 +41,11 @@ Studio, ChatBox, NextChat, LobeChat, the OpenAI SDK, Codex CLI, Gemini CLI.
 - **Nine models** — Flash, Extended Thinking, Pro, Auto, Lite, with adjustable
   thinking depth
 - **Optional auth** — open by default, Bearer/`x-api-key`/`x-goog-api-key` when
-  you set keys, plus optional rate limiting
+  you set keys, plus optional rate limiting with `Retry-After` and
+  `X-RateLimit-*` headers so clients back off on their own
+- **Hardened responses** — every response carries `X-Content-Type-Options` and
+  `Referrer-Policy`; the console adds `X-Frame-Options` and a strict
+  Content-Security-Policy; malformed requests are 400s, never 500s
 - **Self-healing** — refreshes Google's build tag automatically instead of
   breaking on a frontend rollout
 - **Prometheus metrics** — `GET /metrics` exports counters, status codes and a
@@ -50,7 +54,9 @@ Studio, ChatBox, NextChat, LobeChat, the OpenAI SDK, Codex CLI, Gemini CLI.
   accounts; a rate-limited one rests (`429`) while the request is served by
   another, and a single-cookie setup behaves exactly as before
 - **Web console** — open `http://localhost:8081/` for a chat playground, live
-  status, request activity, model picker and ready-to-paste client config
+  status, request activity, model picker and ready-to-paste client config —
+  a self-contained page (no external assets) in a light/dark Liquid Glass
+  design, with a scroll-to-latest button for long transcripts
 - **Production-ready packaging** — non-root Docker image, healthchecks,
   environment configuration, graceful shutdown, CI
 - **One-click Windows setup** — double-click `start.bat` to create a venv,
@@ -377,6 +383,7 @@ history entry, so a browser request can be traced to its log line.
 | [docs/API.md](docs/API.md) | Every endpoint with request/response examples |
 | [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) | API keys, cookies, XSRF, `auth_user` |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker, Compose, systemd, reverse proxy, Workers |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Day-2 running: probes, metrics, rate limiting, scaling |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model and what is protected by default |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Symptom → cause → fix |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Layout, tests, adding a model, release checklist |
@@ -429,7 +436,7 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api tests
 ```
 
-634 tests, all offline — the Gemini wire protocol is faked at the frame level.
+648 tests, all offline — the Gemini wire protocol is faked at the frame level.
 CI covers Python 3.8–3.13, a stdlib-only run with no third-party packages, a
 build-and-install-the-wheel check, lint and a Docker build.
 

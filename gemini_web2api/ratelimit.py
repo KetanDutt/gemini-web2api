@@ -9,6 +9,7 @@ regardless of traffic volume: one integer per key per window. Expired keys are
 swept opportunistically so a long-lived process does not accumulate entries for
 clients that never come back.
 """
+import math
 import threading
 import time
 
@@ -42,12 +43,16 @@ class RateLimiter:
     def check(self, key):
         """Record a hit for ``key``.
 
-        Returns ``(allowed, retry_after_seconds, remaining)``. When the limiter
-        is disabled it always allows and reports ``remaining`` as ``None``.
+        Returns ``(allowed, retry_after_seconds, remaining, reset_seconds)``.
+        ``retry_after`` is only positive when the hit was refused; ``reset``
+        is how long until the current window ends either way, which is what
+        the ``X-RateLimit-Reset-Requests`` response header reports. When the
+        limiter is disabled it always allows and reports ``remaining`` and
+        ``reset`` as ``None``.
         """
         with self._lock:
             if self._max <= 0:
-                return True, 0, None
+                return True, 0, None, None
             now = time.time()
             if now - self._last_sweep > self._SWEEP_INTERVAL_SEC or len(self._windows) > self._MAX_KEYS:
                 self._sweep(now)
@@ -58,11 +63,14 @@ class RateLimiter:
                 window_start, count = now, 0
             count += 1
             self._windows[key] = (window_start, count)
+            # ceil, not int()+1: on the first hit of a window the elapsed time
+            # is exactly 0.0, and int(60 - 0.0) + 1 reports 61 seconds for a
+            # 60-second window.
+            reset = max(1, math.ceil(self._window - (now - window_start)))
 
             if count > self._max:
-                retry_after = max(1, int(self._window - (now - window_start)) + 1)
-                return False, retry_after, 0
-            return True, 0, self._max - count
+                return False, reset, 0, reset
+            return True, 0, self._max - count, reset
 
     def _sweep(self, now):
         stale = [k for k, (start, _) in self._windows.items() if now - start >= self._window]

@@ -9,6 +9,76 @@ was reproduced.
 
 ---
 
+## [1.3.0]
+
+### Fixed
+
+- **Malformed `messages` no longer reaches the upstream.** A string was
+  iterated character by character — each letter became a prompt line and the
+  garbage went to Gemini as a real request (HTTP 200). A non-list such as an
+  integer raised `TypeError` and surfaced as a 500. Both are now 400
+  `invalid_request_error / invalid_messages`, and the upstream is never called.
+- **`stream_options` is validated before use.** `"stream_options": "yes"`
+  crashed on `.get()` and returned a 500; it is now a 400
+  `invalid_stream_options`.
+- **Rate-limited responses carry `Retry-After`.** The limiter computed
+  `retry_after` but the handler discarded it, so a 429 told the client nothing
+  about when to come back. The header now matches the limiter's own value, and
+  an upstream 429 passes the credential cooldown as `Retry-After`.
+- **The rate limiter no longer reports a reset of 61 s for a 60 s window.**
+  The first hit of a window has an elapsed time of exactly 0, and the old
+  `int(window - elapsed) + 1` rounding added a second that does not exist.
+- **A CORS preflight with a body no longer desynchronises keep-alive.**
+  `do_OPTIONS` answered without draining the request body, so a client that
+  sent one left the connection's framing shifted for the next request.
+- Removed the dead `_send_error` alias (defined, never called) and two
+  redundant local `metrics_snapshot` imports.
+
+### Added
+
+- **Response security headers on every response.**
+  `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` are sent
+  on JSON, HTML, SSE and error responses alike — including the stock error
+  pages the base handler writes for malformed requests. The dashboard
+  additionally sends `X-Frame-Options: DENY` and a Content-Security-Policy
+  (`default-src 'none'` with `unsafe-inline` script/style, `img-src data:`,
+  `connect-src 'self'`) that blocks external loads, `<base>` hijacks, outbound
+  form posts and framing, while still permitting the page's self-contained
+  inline script, inline styles, `data:` favicon and same-origin fetches.
+- **OpenAI-style rate-limit headers on API responses.**
+  `X-RateLimit-Limit-Requests`, `X-RateLimit-Remaining-Requests` and
+  `X-RateLimit-Reset-Requests` are sent on success and on the 429 alike (and
+  are absent when the limiter is disabled, so clients do not read a limit of 0
+  as "never allowed"). `RateLimiter.check()` now also returns the window-reset
+  time that backs the reset header.
+- **Dashboard polish.** A `<meta name="description">`, light/dark
+  `theme-color` metas matching the page background, and a scroll-to-bottom
+  button in the chat that appears only when the transcript is scrolled up.
+
+### Changed
+
+- **Model listings are cached.** `GET /v1/models`, `GET /v1beta/models` and
+  model detail rebuilt their response dicts on every call; the model table is
+  static for the life of the process, so the listings are now memoised.
+- **One shared urllib opener per proxy setting.** Image fetches and Scotty
+  uploads built a fresh opener per image; the handlers are stateless per
+  request, so a single cached opener per (proxy, redirect-guard) combination is
+  reused instead.
+- `fetch_image_bytes` documents what actually happens on a refused image (the
+  caller rejects the request with a 400 naming the URL); the old docstring
+  claimed callers silently skipped it.
+
+### Tests
+
+- 14 new tests (634 → 648): request-shape validation (`messages` /
+  `stream_options` must be an array / object, upstream never called on a 400),
+  `Retry-After` on limiter and upstream 429s, OpenAI-style rate-limit headers
+  on success and 429 and their absence when disabled, security headers across
+  JSON/HTML/SSE/404/401, the dashboard CSP matching what the page actually uses,
+  model-listing caching, and the limiter's reset-time contract.
+
+---
+
 ## [1.2.0]
 
 ### Fixed

@@ -312,6 +312,63 @@ class ChatCompletionTests(ServerTestCase):
         second = self.get("/health")[1]["X-Request-Id"]
         self.assertNotEqual(first, second)
 
+    @mock.patch("gemini_web2api.server.generate")
+    def test_upstream_429_carries_retry_after(self, generate):
+        """A client told to retry needs to be told *when*.
+
+        The limiter and the credential pool both compute a wait; without the
+        header a well-behaved client can only guess, and guessing wrong in
+        either direction is a retry storm or a dead wait.
+        """
+        from gemini_web2api.gemini import GeminiUpstreamError
+        generate.side_effect = GeminiUpstreamError("HTTP 429", status=429)
+        status, headers, _body = self.post_json("/v1/chat/completions", CHAT_BODY)
+        self.assertEqual(status, 429)
+        self.assertEqual(headers.get("Retry-After"), "60")
+
+
+class RequestValidationTests(ServerTestCase):
+    """Malformed request fields must be 400s, never 500s or garbage upstream.
+
+    Both defects below were reproduced before the fix: `messages` as a string
+    was iterated character by character and the letters were sent upstream as
+    the prompt, and `messages` as an int raised TypeError and surfaced as a
+    500. A 500 for a client mistake also pollutes the error metrics and pages
+    whoever is on call.
+    """
+
+    @mock.patch("gemini_web2api.server.generate")
+    def test_messages_must_be_an_array(self, generate):
+        for bad in ("hello", 123, {"role": "user"}, 4.5):
+            with self.subTest(messages=bad):
+                status, _headers, body = self.post_json(
+                    "/v1/chat/completions",
+                    {"model": "gemini-3.6-flash", "messages": bad})
+                self.assertEqual(status, 400)
+                self.assertEqual(body["error"]["code"], "invalid_messages")
+        generate.assert_not_called()
+
+    @mock.patch("gemini_web2api.server.generate")
+    def test_stream_options_must_be_an_object(self, generate):
+        status, _headers, body = self.post_json("/v1/chat/completions", {
+            "model": "gemini-3.6-flash",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True, "stream_options": "yes"})
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"]["code"], "invalid_stream_options")
+        generate.assert_not_called()
+
+    @mock.patch("gemini_web2api.server.generate")
+    def test_valid_stream_options_is_accepted(self, generate):
+        """The guard must not reject the shape the OpenAI spec defines."""
+        generate.return_value = "ok"
+        status, _headers, body = self.post_json("/v1/chat/completions", {
+            "model": "gemini-3.6-flash",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream_options": {"include_usage": True}})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["choices"][0]["message"]["content"], "ok")
+
 
 class ChatStreamingTests(ServerTestCase):
     @mock.patch("gemini_web2api.server.generate_stream")

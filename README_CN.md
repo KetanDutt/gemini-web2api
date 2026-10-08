@@ -31,11 +31,12 @@
 - **JSON 模式** —— 支持 `response_format` 的 `json_object` 与 `json_schema`，返回前会校验结果，而不是只把要求写进提示词
 - **图片输入** —— 支持 URL 与 base64，内置 SSRF 防护，走 Gemini 自有上传通道
 - **九个模型** —— Flash、扩展思考、Pro、Auto、Lite，思考深度可调
-- **可选鉴权** —— 默认开放；配置密钥后支持 Bearer / `x-api-key` / `x-goog-api-key`，并可选限流
+- **可选鉴权** —— 默认开放；配置密钥后支持 Bearer / `x-api-key` / `x-goog-api-key`，并可选限流，响应携带 `Retry-After` 与 `X-RateLimit-*` 头，客户端可据此自动退避
+- **加固的响应头** —— 所有响应都带 `X-Content-Type-Options` 与 `Referrer-Policy`；控制台额外带 `X-Frame-Options` 与严格的内容安全策略（CSP）；畸形请求一律返回 400，绝不返回 500
 - **自愈能力** —— 自动刷新 Google 的构建标签（`bl`），前端改版不会导致服务失效
 - **Prometheus 指标** —— `GET /metrics` 以文本暴露格式导出计数器、状态码与延迟直方图，可直接接入既有监控
 - **多账号轮换** —— 通过 `cookie_files` 配置多个 Google 账号，被限流（`429`）的账号进入冷却，请求立即改由其他账号完成；单 cookie 部署行为完全不变
-- **Web 控制台** —— 打开 `http://localhost:8081/`，含对话 Playground、实时状态、请求活动、模型选择与可直接粘贴的客户端配置
+- **Web 控制台** —— 打开 `http://localhost:8081/`，含对话 Playground、实时状态、请求活动、模型选择与可直接粘贴的客户端配置——单文件自包含页面（不加载任何外部资源），采用明暗双主题的 Liquid Glass 设计，长对话可一键滚动到最新消息
 - **生产级打包** —— 非 root Docker 镜像、健康检查、环境变量配置、优雅停机、CI
 - **Windows 一键启动** —— 双击 `start.bat` 即可创建虚拟环境、安装依赖、生成安全的 `config.json` 并启动服务
 - **零必需依赖** —— Python 3.8+，`httpx` 为可选
@@ -340,6 +341,7 @@ curl -s http://localhost:8081/status | python3 -m json.tool   # 指标 + 脱敏�
 | [docs/API.md](docs/API.md) | 全部端点及请求/响应示例 |
 | [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) | API 密钥、Cookie、XSRF、`auth_user` |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker、Compose、systemd、反向代理、Workers |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | 日常运维：探针、指标、限流、扩缩容 |
 | [docs/SECURITY.md](docs/SECURITY.md) | 威胁模型与默认防护 |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 现象 → 原因 → 解决 |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 目录结构、测试、新增模型、发布清单 |
@@ -376,7 +378,7 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api tests
 ```
 
-634 个测试，全部离线运行——Gemini 协议在帧级别被模拟。CI 覆盖 Python 3.8–3.13、无第三方依赖的纯标准库运行、构建并安装 wheel 的校验、lint 与 Docker 构建。
+648 个测试，全部离线运行——Gemini 协议在帧级别被模拟。CI 覆盖 Python 3.8–3.13、无第三方依赖的纯标准库运行、构建并安装 wheel 的校验、lint 与 Docker 构建。
 
 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**
 
