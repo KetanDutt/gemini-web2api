@@ -712,7 +712,7 @@ main.content{
    scroll, and nothing overlaps the footer. The chat section bounds its own
    transcript instead, via a definite height on .chat below. */
 section.tab{display:none;flex-direction:column;gap:var(--sp-5);min-width:0;flex:0 0 auto}
-section.tab.active{display:flex;animation:panelIn var(--d-3) var(--e-enter)}
+section.tab.active{display:flex;animation:panelIn var(--d-4) var(--e-enter)}
 @keyframes panelIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 
 .phead{display:flex;align-items:flex-end;gap:var(--sp-4);flex-wrap:wrap;padding:var(--sp-1) 2px 0}
@@ -770,7 +770,9 @@ section.tab.active{display:flex;animation:panelIn var(--d-3) var(--e-enter)}
   font-size:var(--fs-body);font-weight:545;letter-spacing:-.011em;line-height:1.4;
   font-variant-numeric:tabular-nums;overflow-wrap:anywhere;
 }
-.tile .v.mono{font-family:var(--mono);font-size:var(--fs-sm);font-weight:500}
+/* Technical values (URLs, build tags, versions) sit one notch down from prose:
+   they are reference strings, and a URL that wraps at all reads badly. */
+.tile .v.mono{font-family:var(--mono);font-size:var(--fs-meta);font-weight:500;letter-spacing:-.01em}
 .tile .hintline{font-size:var(--fs-micro);color:var(--fg-3);margin-top:2px}
 .tile--accent{border-color:var(--acc-line)}
 .tile--accent .v{color:var(--accent)}
@@ -1356,9 +1358,13 @@ footer.foot .dot-sep{
   .thread-bar input[type="password"]{width:100%;min-width:0;font-size:var(--fs-body);padding-top:9px;padding-bottom:9px}
 }
 @media (max-width:470px){
-  /* One control per row: side-by-side selects would wrap their own labels. */
-  .thread-bar select{flex:1 1 100%;max-width:100%}
-  .thread-bar .switch{order:4}
+  .thread-bar select{flex:1 1 46%;max-width:calc(50% - 4px)}
+  .thread-bar .switch{order:3}
+  .thread-bar .key-field{order:2}
+  /* Two lines of orientation are enough on a phone; the transcript is the point. */
+  .phead p{
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  }
 }
 @media (max-width:560px){
   :root{--fs-h1:25px}

@@ -76,11 +76,18 @@ was reproduced.
 - **Long transcripts no longer push the composer off screen.** The console is
   bounded to the viewport and the content pane scrolls inside it, so the
   transcript, composer, dock and masthead stay put while a long reply scrolls.
+- **Phone layouts stop spending the screen on chrome.** Under 620 px the chat
+  toolbar stacks instead of clipping its API-key field and the two selects share
+  a row, while the section blurb clamps to two lines: a phone shows roughly a
+  third more transcript before scrolling. Copy chips take a 34 px touch target
+  on coarse pointers.
 
 ### Accessibility
 
-- The chat toolbar stacks under 620 px instead of clipping its API-key field,
-  and copy chips grow to a 34 px touch target on coarse pointers.
+- Sections animate in over 440 ms and everything else over 130-280 ms, on one
+  motion scale; `prefers-reduced-motion` collapses all of it.
+- The transcript, composer, dock and masthead stay put on a long conversation,
+  so the composer never leaves the screen while a reply scrolls.
 
 ---
 
