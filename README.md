@@ -56,9 +56,12 @@ Studio, ChatBox, NextChat, LobeChat, the OpenAI SDK, Codex CLI, Gemini CLI.
 - **Web console** — open `http://localhost:8081/` for a chat playground, live
   status, request activity, model picker and ready-to-paste client config —
   a self-contained page (no external assets) in a Liquid Glass design system:
-  floating dock navigation, light/dark/system themes, skeleton loading, a
-  command palette (`Ctrl`/`Cmd`+`K`), keyboard shortcuts, glass toasts and an
-  accessible focus order, all honouring `prefers-reduced-motion`
+  six material strengths, a floating nav rail that becomes a bottom bar on
+  phones, light/dark/system themes, directional view transitions, skeleton
+  loading, a command palette (`Ctrl`/`Cmd`+`K`), keyboard shortcuts, glass
+  toasts with visible timers and an accessible focus order — all honouring
+  `prefers-reduced-motion`, `prefers-reduced-transparency` and
+  `prefers-contrast`
 - **Production-ready packaging** — non-root Docker image, healthchecks,
   environment configuration, graceful shutdown, CI
 - **One-click Windows setup** — double-click `start.bat` to create a venv,
@@ -438,7 +441,7 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api tests
 ```
 
-648 tests, all offline — the Gemini wire protocol is faked at the frame level.
+662 tests, all offline — the Gemini wire protocol is faked at the frame level.
 CI covers Python 3.8–3.13, a stdlib-only run with no third-party packages, a
 build-and-install-the-wheel check, lint and a Docker build.
 

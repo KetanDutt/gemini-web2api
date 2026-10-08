@@ -15,29 +15,64 @@ was reproduced.
 
 - **The web console was rebuilt on an explicit design system.** The page is
   still one self-contained file with no external assets, but every surface now
-  comes from a small set of tokens — four glass strengths (`glass-1` …
-  `glass-4`), four blur radii, one radius and spacing scale, one shadow ramp,
-  six named z-layers and a motion scale (130/190/280/440 ms with spring and
-  ease-out curves). Nothing in the interface invents a value: a new component
-  picks a token or the token set grows.
-- **Navigation floats instead of framing.** The dock is a glass bar that hovers
-  above the content, glides its active pill between tabs, deepens its shadow
-  once content scrolls under it, and becomes a thumb-reachable bottom bar under
-  900 px — the same DOM, repositioned rather than reimplemented.
+  comes from a small set of tokens — six glass strengths (`glass-1` … `glass-6`,
+  one per elevation), five blur radii, one radius and spacing scale, one shadow
+  ramp, seven named z-layers and a motion scale (130/190/260/380/520 ms with
+  spring, glide and ease-out curves). Nothing in the interface invents a value:
+  a new component picks a token or the token set grows.
+- **The shell is a spatial layout, not a framed page.** A floating glass topbar
+  holds identity, live health and the global actions; a glass navigation rail
+  floats beside the workspace with a glider that travels to the active item; and
+  the workspace is a quiet translucent pane that the panels and cards layer
+  above. Under 980 px the same rail becomes a thumb-reachable bottom bar, the
+  topbar keeps the section name, and the tablist's `aria-orientation` follows the
+  layout — the same DOM, repositioned rather than reimplemented.
+- **Every material shares one recipe.** A translucent fill, a backdrop blur with
+  a little extra saturation, a hairline, a masked 1 px edge light and a shadow
+  from the ramp; only the strength changes with elevation. Text is never
+  translucent, and the glass is there to reveal the background rather than to
+  make reading harder.
+- **Scroll is answered by the chrome.** Past a few pixels the topbar compacts and
+  reveals the section name, the rail and the pane firm up, and the ambient halo
+  drifts: one rAF per burst of scroll events, and only transform and
+  background-color change.
+- **Interaction is a light touch everywhere.** Buttons, tiles, tabs and chips
+  carry a soft highlight that follows the pointer (delegated, rAF-throttled, and
+  absent on touch or under reduced motion); send morphs into stop in place;
+  refresh spins its own glyph while a fetch is in flight and the pane reports
+  `aria-busy`; copy chips answer with a drawn check; toasts carry a timer you can
+  read that pauses while the pointer rests on them.
+- **View changes are directional.** Switching sections crossfades and slides the
+  incoming pane from the side the reader is travelling towards, so the interface
+  keeps its spatial continuity instead of cutting.
 - **Appearance is now a first-class choice.** Light, dark and follow-the-system
-  are selectable from the masthead and remembered per browser; the dark scheme
-  is a designed palette (deep neutral canvas, translucent surfaces, reduced
-  border contrast) rather than an inversion.
+  are selectable from the topbar and remembered per browser; the dark scheme is
+  a designed palette (deep neutral canvas, six materials that stay visible
+  without turning white, reduced border contrast) rather than an inversion.
 - **Every view got the same treatment, not just the landing tab.** Chat
-  (conversation rail, streamed replies, avatar and meta chips, morphing
-  send/stop control), Status (stat tiles with animated counters, tinted
-  callouts, account cooldown meters, a real latency histogram with an accessible
-  summary), Activity (relative timestamps, per-row entry animation for new
+  (conversation rail, streamed replies with a pulsing caret, avatar and meta
+  chips, one composer well holding the field, the hint and send/stop), Status
+  (stat tiles with animated counters, tinted callouts, account cooldown meters, a
+  latency histogram whose busiest bucket is labelled in place and whose bars grow
+  on entry), Activity (relative timestamps, per-row entry animation for new
   requests, sticky header), Models (filterable cards) and API (copy-ready
-  snippets).
+  snippets) — each with its own skeleton, empty and error state.
+- **Small things that only show up in use were finished off.** A restored
+  transcript says when the conversation started, clearing a chat is styled as
+  the destructive action it is, and every `localStorage` read and write is
+  guarded — so the console still boots when it is framed inside another page and
+  the browser denies storage to third-party contexts.
 - **Tables reflow instead of scrolling sideways on phones.** Under 760 px each
-  row becomes a labelled block, which is what the `data-label` attributes on
-  the generated cells exist for.
+  row becomes a labelled block, which is what the `data-label` attributes on the
+  generated cells exist for.
+- **Token discipline is now enforced, not just intended.** A final pass moved the
+  last hand-painted values into the palettes — button and switch elevation
+  (`--sh-lift-1/2`, `--sh-knob`, `--sh-knob-press`), the highlight on a tinted
+  fill (`--edge-hi-strong`), the chip fill that sits on a tint
+  (`--fill-on-tint`), content on an accent fill (`--on-accent`) and the pointer
+  light itself (`--sheen`, `--sheen-fade`). Outside the two palettes and the
+  canvas backdrop the stylesheet paints no colour of its own, and the three new
+  structural tests fail the build if that slips again.
 
 ### Added
 
@@ -84,10 +119,24 @@ was reproduced.
 
 ### Accessibility
 
-- Sections animate in over 440 ms and everything else over 130-280 ms, on one
-  motion scale; `prefers-reduced-motion` collapses all of it.
-- The transcript, composer, dock and masthead stay put on a long conversation,
-  so the composer never leaves the screen while a reply scrolls.
+- One focus ring for the whole product, visible on keyboard use; dialogs trap
+  focus and restore it; icon-only controls are labelled; and the rail carries no
+  second live region, so server health is announced once.
+- Sections animate in over 380 ms and everything else over 130–520 ms, on one
+  motion scale; `prefers-reduced-motion` collapses all of it while keeping every
+  state change visible (the glider still lands on the active item, counters still
+  settle on their value).
+- `prefers-reduced-transparency` swaps the six materials for near-solid ones
+  derived from a per-theme surface triplet, `prefers-contrast:more` firms the
+  hairlines and mixes stronger ink from the theme's own foreground, and the page
+  falls back to opaque materials where `backdrop-filter` is unsupported.
+- The transcript, composer, topbar and rail stay put on a long conversation, so
+  the composer never leaves the screen while a reply scrolls.
+- The document is checked structurally: every control has an accessible name
+  (via `aria-label`, `aria-labelledby`, a `<label for=…>` or a wrapping
+  `<label>`), animations only touch properties the compositor can interpolate
+  (no keyframe animates width, height, inset or margin), and the motion scale
+  stays inside 120–520 ms.
 
 ---
 
