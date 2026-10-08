@@ -53,8 +53,9 @@ Python; the launcher verifies each candidate with a real version check and skips
 it if that fails.
 
 **A failed `pip install` is a warning, not a fatal error.** `httpx` is optional:
-without it the server still runs, but `stream: true` returns one buffered chunk
-instead of a real stream. Offline users still get a working server.
+without it the stdlib transport still streams incrementally and keeps its
+connections alive, so `stream: true` behaves the same way; `httpx` only changes
+which HTTP client does the talking. Offline users still get a full-speed server.
 
 **The window stays open on failure.** A launcher that exits immediately hides
 the reason it failed, so errors end in `pause`.

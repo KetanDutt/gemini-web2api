@@ -8,7 +8,7 @@ import threading
 
 from . import __version__
 from .config import CONFIG, find_config, load_config, load_warnings, mark_explicit
-from .gemini import HAS_HTTPX, set_log_level, warm_up
+from .gemini import HAS_HTTPX, preconnect, set_log_level, warm_up
 from .models import MODELS, default_model
 from .server import build_server
 
@@ -113,8 +113,8 @@ def print_banner(server):
         auth=(f"{len(keys)} key(s) required" if keys else "DISABLED — open access"),
         cookie=cookie,
         proxy=CONFIG.get("proxy") or "system env (HTTP_PROXY/HTTPS_PROXY)",
-        streaming=("httpx (true streaming)" if HAS_HTTPX else
-                   "urllib (buffered — pip install httpx for real streaming)"),
+        streaming=("httpx (pooled, incremental)" if HAS_HTTPX else
+                   "stdlib http.client (pooled, incremental)"),
         bl=CONFIG.get("gemini_bl"),
         rate_limit=(f"{CONFIG['rate_limit_max']}/{CONFIG['rate_limit_window_sec']}s"
                     if CONFIG.get("rate_limit_max") else "disabled"),
@@ -124,8 +124,9 @@ def print_banner(server):
         print("  ⚠ No API keys configured: anyone who can reach this port can use it.")
         print("    Set api_keys in config.json, or pass --api-key.")
     if not HAS_HTTPX:
-        print("  ⚠ httpx is not installed; 'stream': true returns one buffered chunk.")
-        print("    Install it with: pip install httpx")
+        print("  ℹ httpx is not installed: streaming uses the stdlib transport "
+              "(pooled connections, incremental reads).")
+        print("    pip install httpx for its HTTP/2-capable transport instead.")
     for warning in load_warnings():
         print(f"  ⚠ {warning}")
     sys.stdout.flush()
@@ -154,6 +155,10 @@ def main(argv=None):
         print(f"  ⚠ startup warm-up failed: {exc}", file=sys.stderr)
 
     print_banner(server)
+
+    # Warm the transport in the background: the banner should not wait on a
+    # handshake, but the first request should not pay for one either.
+    threading.Thread(target=preconnect, daemon=True).start()
 
     stopping = [False]
 

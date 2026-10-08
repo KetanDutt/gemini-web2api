@@ -13,6 +13,33 @@ was reproduced.
 
 ### Changed
 
+- **The upstream transport no longer pays for a handshake on every request, and
+  no longer waits for the whole answer before sending the first token.** `httpx`
+  has always pooled its connections, but the stdlib fallback used
+  `urllib.request.urlopen`, which opens a fresh TCP+TLS connection per call, and
+  it buffered the entire reply before yielding a single delta. Both are gone: the
+  fallback now speaks `http.client` over a small keep-alive pool and reads
+  incrementally, so a deployment without `httpx` streams exactly like one with
+  it. Measured end to end through the server, against a local stand-in upstream
+  that spaces ten frames 50 ms apart: the first content frame used to arrive
+  with the last one at ~455 ms and now arrives at 1–2 ms, and three requests
+  cost three upstream connections instead of one. A pooled socket that the far
+  end closed while it was idle is retried once on a fresh connection, which is
+  safe because that failure happens before any response byte is read.
+- **Connecting has its own timeout (`connect_timeout_sec`, default 10 s).**
+  Previously the handshake inherited `request_timeout_sec`, so a black-holed
+  route held a request for three minutes before it could be retried — which is
+  most of the difference between a slow reply and an error a caller can act on.
+  Reading still gets the full `request_timeout_sec`; a thinking model is not
+  being rushed.
+- **A transport failure retries immediately; an HTTP error still waits.** A DNS
+  blip, a refused connection or a stale pooled socket does not repair itself in
+  two seconds, and no account was refused, so there is nothing to cool down and
+  nothing to sleep for. `retry_delay_sec` still applies to the case it was meant
+  for: upstream answering with a status that may change.
+- **One upstream connection is opened at startup.** The banner does not wait on
+  it — it runs in the background — but the first request after a restart finds a
+  socket already connected and pays no handshake.
 - **The web console was rebuilt on an explicit design system.** The page is
   still one self-contained file with no external assets, but every surface now
   comes from a small set of tokens — six glass strengths (`glass-1` … `glass-6`,
@@ -116,6 +143,20 @@ was reproduced.
   a row, while the section blurb clamps to two lines: a phone shows roughly a
   third more transcript before scrolling. Copy chips take a 34 px touch target
   on coarse pointers.
+
+### Tests
+
+- **`tests/test_transport.py`** drives the transport over a real socket: a local
+  stand-in for Gemini that counts the connections it accepts, spaces its frames
+  out in time, answers with an error status, or hangs up between requests on
+  purpose. It pins connection reuse (both `Content-Length` and chunked framings),
+  incremental delivery, the split timeouts, that a refused connection is retried
+  without sleeping, that an HTTP error still is not, and that the pool is bounded
+  and expires idle sockets.
+- **`scripts/bench.py` and `scripts/bench_upstream.py`** measure the two halves
+  of latency separately — the server's own overhead (sub-millisecond) and the
+  upstream leg, including time to first byte — so a change to either can be
+  judged against a number instead of an impression.
 
 ### Accessibility
 

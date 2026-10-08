@@ -1432,7 +1432,7 @@ class GeminiHandler(BaseHTTPRequestHandler):
             "version": __version__,
             "uptime_sec": round(time.time() - _START_TIME, 1),
             "requests_served": metrics["counters"]["requests"],
-            "streaming": "httpx" if HAS_HTTPX else "buffered (install httpx for real streaming)",
+            "streaming": "httpx" if HAS_HTTPX else "stdlib-http.client",
             "cookie_configured": bool(CONFIG.get("cookie_file")),
             "auth_enabled": bool(CONFIG.get("api_keys")),
             "default_model": CONFIG.get("default_model"),
@@ -1452,7 +1452,9 @@ class GeminiHandler(BaseHTTPRequestHandler):
             checks["warnings"].append(
                 "authentication is disabled: anyone who can reach this port can use it")
         if not HAS_HTTPX:
-            checks["warnings"].append("httpx is not installed; streaming is buffered")
+            checks["warnings"].append(
+                "httpx is not installed; using the stdlib transport "
+                "(pooled connections, incremental streaming)")
         if CONFIG.get("host") == "0.0.0.0" and not CONFIG.get("block_private_image_urls", True):
             checks["warnings"].append(
                 "block_private_image_urls is disabled while listening on 0.0.0.0 (SSRF risk)")
@@ -1500,7 +1502,7 @@ class GeminiHandler(BaseHTTPRequestHandler):
             "version": __version__,
             "uptime_sec": metrics["uptime_sec"],
             "base_url": f"http://{self.headers.get('Host') or 'localhost'}/v1",
-            "streaming": "httpx (true streaming)" if HAS_HTTPX else "urllib (buffered)",
+            "streaming": "httpx (pooled)" if HAS_HTTPX else "stdlib (pooled)",
             "api_keys": f"{len(keys)} configured" if keys else "disabled — open access",
             "cookie": "loaded" if config.get("cookie_present") else
                       ("configured but missing" if CONFIG.get("cookie_file") else "anonymous"),

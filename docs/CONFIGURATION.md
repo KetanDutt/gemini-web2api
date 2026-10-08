@@ -60,6 +60,7 @@ From the environment, `api_keys` accepts a comma list (`a,b,c`), a pipe list
 | `retry_attempts` | `3` | `GEMINI_WEB2API_RETRY_ATTEMPTS` | — | Total attempts per request. Clamped to ≥ 1. |
 | `retry_delay_sec` | `2` | `GEMINI_WEB2API_RETRY_DELAY_SEC` | — | Delay between attempts. |
 | `request_timeout_sec` | `180` | `GEMINI_WEB2API_REQUEST_TIMEOUT_SEC` | — | Upstream timeout. Thinking models can take a while. |
+| `connect_timeout_sec` | `10` | `GEMINI_WEB2API_CONNECT_TIMEOUT_SEC` | — | Timeout for the upstream TCP+TLS handshake, separate from the read timeout. A stalled connect used to consume the full `request_timeout_sec` before the attempt could be retried. Clamped to at most `request_timeout_sec`. |
 | `proxy` | `null` | `GEMINI_WEB2API_PROXY` | `--proxy` | HTTP proxy. Falls back to `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`. |
 | `max_image_bytes` | `20971520` (20 MiB) | `GEMINI_WEB2API_MAX_IMAGE_BYTES` | — | Cap on a fetched remote image. |
 | `block_private_image_urls` | `true` | `GEMINI_WEB2API_BLOCK_PRIVATE_IMAGE_URLS` | — | Refuse image URLs resolving to loopback/link-local/private/reserved addresses. |
@@ -220,7 +221,7 @@ The web dashboard at `http://localhost:8081/` shows the same thing in a browser.
 | Warning | Meaning |
 |---|---|
 | `No API keys configured` | Anyone who can reach the port can use the server. |
-| `httpx is not installed` | `stream: true` returns one buffered chunk instead of incremental deltas. |
+| `httpx is not installed` | Informational: the stdlib transport is being used (pooled connections, incremental reads). Install `httpx` for its transport instead. |
 | `cookie_file does not exist` | The configured path is wrong, or the mount is missing. |
 | `Could not refresh bl from upstream` | Google was unreachable at startup; the pinned value is used. Harmless if the pinned value is current. |
 | `Cookie loaded but SAPISID is absent` | The cookie is incomplete. Authenticated Pro routing will not work. |

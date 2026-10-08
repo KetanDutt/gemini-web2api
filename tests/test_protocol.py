@@ -347,17 +347,44 @@ class GenerateStreamTests(ConfigTestCase):
         self.assertEqual(client.stream.call_count, 1)
 
 
-class NoHttpxFallbackTests(ConfigTestCase):
-    def test_falls_back_to_buffered_generation(self):
-        with mock.patch("gemini_web2api.gemini.HAS_HTTPX", False), \
-             mock.patch("gemini_web2api.gemini.generate", return_value="buffered") as gen:
-            self.assertEqual(list(generate_stream("hi", 1, 4)), ["buffered"])
-            gen.assert_called_once()
+class NoHttpxTests(ConfigTestCase):
+    """Without httpx the stdlib transport runs the same protocol.
 
-    def test_fallback_yields_nothing_for_an_empty_reply(self):
+    It used to fall back to a *buffered* request — one chunk after the whole
+    answer was in hand — which is why these tests used to assert exactly that.
+    The stdlib path now streams through a pooled ``http.client`` connection, so
+    the contract is the transport, not the fallback: ``tests/test_transport.py``
+    drives the real thing over a socket.
+    """
+
+    def test_streaming_does_not_require_httpx(self):
+        """The reply is consumed through ``_open_stream``, not ``client.stream``."""
+        chunks = [gemini_frame("Hel") + "\n", gemini_frame("Hello") + "\n"]
+        calls = []
+
+        class Response:
+            status_code = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def raise_for_status(self):
+                pass
+
+            def iter_text(self):
+                yield from chunks
+
+        def fake_open_stream(body, headers, url, client):
+            calls.append(client)
+            return Response()
+
         with mock.patch("gemini_web2api.gemini.HAS_HTTPX", False), \
-             mock.patch("gemini_web2api.gemini.generate", return_value=""):
-            self.assertEqual(list(generate_stream("hi", 1, 4)), [])
+             mock.patch("gemini_web2api.gemini._open_stream", side_effect=fake_open_stream):
+            self.assertEqual("".join(generate_stream("hi", 1, 4)), "Hello")
+        self.assertEqual(calls, [None], "the stdlib transport takes no client")
 
 
 if __name__ == "__main__":

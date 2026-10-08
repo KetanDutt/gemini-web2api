@@ -30,8 +30,10 @@ Studio, ChatBox, NextChat, LobeChat, the OpenAI SDK, Codex CLI, Gemini CLI.
 - **OpenAI-compatible** — `/v1/chat/completions`, `/v1/completions`,
   `/v1/responses`, `/v1/models`, `/v1/models/{id}`
 - **Google-native** — `/v1beta/...` endpoints for Gemini CLI
-- **Streaming** — real incremental SSE via `httpx`, with a buffered stdlib
-  fallback
+- **Streaming** — real incremental SSE on both transports: `httpx` (pooled) or,
+  without it, a stdlib `http.client` keep-alive pool. Connections are reused
+  and the handshake is timed separately from the read (`connect_timeout_sec`)
+  so a dead route fails fast instead of burning the request timeout
 - **Tool calling** — function calling in both OpenAI and Google formats,
   including `tool_choice`
 - **JSON mode** — `response_format` with `json_object` and `json_schema`,
@@ -441,7 +443,7 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api tests
 ```
 
-662 tests, all offline — the Gemini wire protocol is faked at the frame level.
+677 tests, all offline — the Gemini wire protocol is faked at the frame level.
 CI covers Python 3.8–3.13, a stdlib-only run with no third-party packages, a
 build-and-install-the-wheel check, lint and a Docker build.
 
@@ -450,8 +452,9 @@ build-and-install-the-wheel check, lint and a Docker build.
 ## Requirements
 
 - Python 3.8+
-- `httpx` — optional but strongly recommended; without it `stream: true` returns
-  one buffered chunk
+- `httpx` — optional. Streaming and connection pooling work without it (the
+  stdlib transport keeps connections alive and reads incrementally); `httpx`
+  adds an HTTP/2-capable transport and is what most deployments install
 - Network access to `gemini.google.com` (a proxy may be needed in some regions)
 
 ## Cloudflare Workers
