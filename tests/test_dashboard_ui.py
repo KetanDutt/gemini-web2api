@@ -29,7 +29,7 @@ COLOURISH = re.compile(
     r"surface-solid|line-\d|edge-hi|edge-hi-strong|edge-lo|fill-on-tint|on-accent|"
     r"sh-lift-\d|sh-knob|sh-knob-press|"
     r"acc-bg|acc-line|acc-ring|ok-bg|ok-line|warn-bg|warn-line|bad-bg|bad-line|"
-    r"neu-bg|neu-line|sh-\d|sh-inset|sh-well|sh-press)$"
+    r"neu-bg|neu-line|tint-[abc]|sh-\d|sh-inset|sh-well|sh-press)$"
 )
 
 
@@ -200,6 +200,47 @@ class StylesheetTests(unittest.TestCase):
             if COLOURISH.match(name) and (name + ":") not in dark
         )
         self.assertEqual([], missing, "defined for light but not for dark")
+
+    def test_text_colours_meet_wcag_aa_in_both_schemes(self):
+        """Every colour used as text, or as a label on a fill, must reach 4.5:1
+        against the canvas it sits on, in light and dark. Glass is translucent,
+        so the check uses the opaque canvas stops: the worst case behind a
+        surface. A palette change that trades legibility for shade fails here."""
+        css = _style(_page())
+        start = css.index(':root[data-theme="dark"]{')
+        light_css, dark_css = css[:start], css[start:]
+
+        def tokens(block):
+            # First definition wins: the base palette comes before the
+            # prefers-contrast overrides, which restate the same names.
+            found = {}
+            for name, value in re.findall(r"(--[a-z0-9-]+)\s*:\s*(#[0-9a-fA-F]{6})\b", block):
+                found.setdefault(name, value.lower())
+            return found
+
+        def luminance(hex_colour):
+            channels = [int(hex_colour[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+            linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+                      for c in channels]
+            return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+        def ratio(a, b):
+            hi, lo = sorted((luminance(a), luminance(b)), reverse=True)
+            return (hi + 0.05) / (lo + 0.05)
+
+        text_tokens = ["--fg", "--fg-2", "--fg-3", "--accent", "--ok", "--warn", "--bad", "--info"]
+        failures = []
+        for scheme, block in (("light", light_css), ("dark", dark_css)):
+            values = tokens(block)
+            canvas = [values[name] for name in ("--bg-top", "--bg", "--bg-bottom")]
+            for name in text_tokens:
+                worst = min(ratio(values[name], backdrop) for backdrop in canvas)
+                if worst < 4.5:
+                    failures.append(f"{scheme} {name} {worst:.2f}:1")
+            worst = ratio(values["--accent-fg"], values["--accent-fill"])
+            if worst < 4.5:
+                failures.append(f"{scheme} accent-fg on accent-fill {worst:.2f}:1")
+        self.assertEqual([], failures, "below WCAG AA 4.5:1")
 
     def test_every_control_has_an_accessible_name(self):
         """A control with no name is unusable with a screen reader, and an

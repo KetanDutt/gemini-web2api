@@ -11,6 +11,30 @@ was reproduced.
 
 ## [Unreleased]
 
+### Added
+
+- **A Windows application build.** `build_windows.bat` (or
+  `python scripts/build_windows.py`) bundles the server into
+  `dist\windows\gemini-web2api\gemini-web2api.exe` with PyInstaller, smoke-tests
+  it with `--version` and writes a portable zip. `--onefile`, `--clean` and
+  `--dry-run` are supported. Build tools live in `.venv-build`, so the runtime
+  environment is untouched. CI builds the executable on `windows-latest`, starts
+  it and checks `/health`.
+- **The executable is a launcher, not just a binary.** `gemini_web2api.windows`
+  runs from the executable's folder, writes a localhost-only `config.json` on the
+  first run, and opens the dashboard once the port is bound (`--no-browser`
+  skips this). `gemini_web2api.main` takes an optional `on_ready(port)` hook for
+  this.
+
+### Changed
+
+- **Colours and materials are closer to Apple's Liquid Glass.** The light
+  canvas is cooler and carries three ambient tints (`--tint-a/b/c`) that the
+  glass refracts, the accent is the brighter indigo from GlassGem, filled
+  buttons and the user's bubble are lit from above, and dark glass has more
+  blue-tinted depth. Text accents are a half-step deeper than the fills so small
+  labels still clear WCAG AA 4.5:1; a test now enforces that on both schemes.
+
 ### Changed
 
 - **The upstream transport no longer pays for a handshake on every request, and

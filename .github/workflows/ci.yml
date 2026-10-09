@@ -146,6 +146,55 @@ jobs:
       - name: Verify the compatibility shim
         run: python gemini_web2api.py --version
 
+  build-windows:
+    name: Windows executable
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # PyInstaller cannot cross-compile, so the executable is built here on a
+      # real Windows runner. The script smoke-tests --version itself; the steps
+      # below check the launcher behaviour a user actually gets.
+      - name: Build gemini-web2api.exe and the portable zip
+        run: python scripts/build_windows.py --clean
+
+      - name: Check the executable reports its version
+        shell: pwsh
+        run: |
+          $exe = "dist\windows\gemini-web2api\gemini-web2api.exe"
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw "--version exited with $LASTEXITCODE" }
+
+      # Start the real launcher the way a user would, minus the browser, and
+      # confirm the server it wraps answers /health on the port it was given.
+      - name: Start the executable and query /health
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path "dist\windows\gemini-web2api\gemini-web2api.exe"
+          $proc = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden `
+            -ArgumentList @("--no-browser", "--no-auto-bl", "--quiet", "--host", "127.0.0.1", "--port", "8765")
+          try {
+            $health = $null
+            for ($i = 0; $i -lt 60 -and -not $health; $i++) {
+              Start-Sleep -Seconds 2
+              try { $health = Invoke-RestMethod -Uri "http://127.0.0.1:8765/health" -TimeoutSec 5 } catch { }
+            }
+            if (-not $health) { throw "the executable never answered /health" }
+            Write-Output "status=$($health.status) version=$($health.version)"
+            if ($health.status -ne "ok") { throw "unexpected health status: $($health.status)" }
+          } finally {
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gemini-web2api-windows-x64
+          path: dist/windows/*.zip
+          if-no-files-found: error
+
   lint:
     name: lint
     runs-on: ubuntu-24.04

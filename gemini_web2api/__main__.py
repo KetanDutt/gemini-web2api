@@ -132,7 +132,12 @@ def print_banner(server):
     sys.stdout.flush()
 
 
-def main(argv=None):
+def main(argv=None, on_ready=None):
+    """Run the server. ``on_ready(port)`` is called once the socket is bound.
+
+    The hook exists for the Windows launcher, which opens the dashboard only
+    after the port is really listening. It is never called on a bind failure.
+    """
     args = build_parser().parse_args(argv)
 
     config_path = args.config or os.environ.get("GEMINI_WEB2API_CONFIG") or find_config()
@@ -155,6 +160,9 @@ def main(argv=None):
         print(f"  ⚠ startup warm-up failed: {exc}", file=sys.stderr)
 
     print_banner(server)
+
+    if on_ready is not None:
+        on_ready(server.server_address[1])
 
     # Warm the transport in the background: the banner should not wait on a
     # handshake, but the first request should not pay for one either.
