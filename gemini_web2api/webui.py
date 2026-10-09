@@ -51,8 +51,8 @@ _DASHBOARD_HTML = r"""<!doctype html>
 <title>gemini-web2api</title>
 <meta name="description" content="gemini-web2api console — chat, accounts and request activity for the Gemini Web → OpenAI-compatible API gateway.">
 <meta name="robots" content="noindex">
-<meta name="theme-color" content="#e9edf5" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0a0c13" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#eef0f5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0f15" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%234285f4'/%3E%3Cstop offset='.5' stop-color='%239b72cb'/%3E%3Cstop offset='1' stop-color='%23d96570'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath fill='url(%23g)' d='M16 2C17 10.2 21.8 15 30 16C21.8 17 17 21.8 16 30C15 21.8 10.2 17 2 16C10.2 15 15 10.2 16 2Z'/%3E%3C/svg%3E">
 <style>
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -81,84 +81,85 @@ _DASHBOARD_HTML = r"""<!doctype html>
   color-scheme:light;
 
   /* Ink. Text is never translucent; only surfaces are. */
-  --bg:#e9edf5;
-  --bg-top:#f7f9fd;
-  --bg-bottom:#dce3f0;
-  --fg:#0e1322;
-  --fg-2:#434c60;
-  --fg-3:#5a6479;
+  --bg:#eef0f5;
+  --bg-top:#f5f6fa;
+  --bg-bottom:#e2e5ee;
+  --fg:#16181f;
+  --fg-2:#5d626d;
+  --fg-3:#5f6470;
   /* Text accents are a half-step deeper than the fills so small labels clear
      4.5:1 on the tinted canvas; the fills carry the brighter GlassGem shades. */
   --accent:#3a52d4;
   --accent-fill:#4a63e7;
+  --accent-hover:#4058d9;
   --accent-fg:#ffffff;
-  --accent-soft:rgba(74,99,231,.11);
+  --accent-soft:rgba(74,99,231,.10);
   --ok:#17704a;  --ok-fill:#2f9e63;
   --warn:#855600; --warn-fill:#c98a1e;
   --bad:#b5262f; --bad-fill:#d9434b;
   --info:#1d6896;
 
   /* Materials — one system, six strengths. Elevation picks the strength. */
-  --glass-1:rgba(255,255,255,.44);   /* inset tiles, cards, list surfaces   */
-  --glass-2:rgba(255,255,255,.58);   /* panels, transcript, tables          */
-  --glass-3:rgba(255,255,255,.70);   /* chrome: topbar, rail, sticky heads  */
-  --glass-4:rgba(255,255,255,.82);   /* popovers, menus, tooltips           */
-  --glass-5:rgba(254,255,255,.89);   /* dialogs and sheets                  */
-  --glass-6:rgba(255,255,255,.93);   /* toasts, highest layer               */
-  --pane:rgba(255,255,255,.34);      /* the workspace the panels sit on     */
-  --pane-stuck:rgba(255,255,255,.52);
-  --fill-1:rgba(16,24,40,.040);      /* quiet fills: hover, rails, meters   */
-  --fill-2:rgba(16,24,40,.075);
-  --fill-3:rgba(16,24,40,.130);
-  --field:rgba(255,255,255,.40);     /* input wells                         */
-  --field-hover:rgba(255,255,255,.58);
-  --field-focus:rgba(255,255,255,.86);
-  --code-bg:rgba(17,24,40,.050);
-  --scrim:rgba(11,15,23,.30);
-  --surface-solid:249,250,252;      /* rgb triplet: opaque fallback surface  */
+  --glass-1:rgba(255,255,255,.38);   /* inset tiles, cards, list surfaces   */
+  --glass-2:rgba(255,255,255,.55);   /* panels, transcript, tables          */
+  --glass-3:rgba(255,255,255,.66);   /* chrome: topbar, rail, sticky heads  */
+  --glass-4:rgba(255,255,255,.80);   /* popovers, menus, tooltips           */
+  --glass-5:rgba(255,255,255,.87);   /* dialogs and sheets                  */
+  --glass-6:rgba(255,255,255,.92);   /* toasts, highest layer               */
+  --pane:rgba(255,255,255,.28);      /* the workspace the panels sit on     */
+  --pane-stuck:rgba(255,255,255,.46);
+  --fill-1:rgba(22,24,31,.045);      /* quiet fills: hover, rails, meters   */
+  --fill-2:rgba(22,24,31,.080);
+  --fill-3:rgba(22,24,31,.130);
+  --field:rgba(255,255,255,.46);     /* input wells                         */
+  --field-hover:rgba(255,255,255,.62);
+  --field-focus:rgba(255,255,255,.90);
+  --code-bg:rgba(22,24,31,.050);
+  --scrim:rgba(20,22,30,.28);
+  --surface-solid:247,248,251;      /* rgb triplet: opaque fallback surface  */
 
   /* Hairlines and edge light. A border defines; it never decorates. */
-  --line-1:rgba(24,36,72,.085);
-  --line-2:rgba(24,36,72,.150);
-  --line-3:rgba(24,36,72,.240);
-  --edge-hi:rgba(255,255,255,.98);
-  --edge-lo:rgba(255,255,255,.28);
-  --edge-hi-strong:rgba(255,255,255,.20);  /* highlight on a tinted fill */
-  --sheen:rgba(255,255,255,.34);            /* pointer light, specular    */
+  --line-1:rgba(22,24,31,.075);
+  --line-2:rgba(22,24,31,.130);
+  --line-3:rgba(22,24,31,.220);
+  --edge-hi:rgba(255,255,255,.88);
+  --edge-lo:rgba(255,255,255,.18);
+  --edge-hi-strong:rgba(255,255,255,.22);  /* highlight on a tinted fill */
+  --sheen:rgba(255,255,255,.30);            /* pointer light, specular    */
   --sheen-fade:rgba(255,255,255,0);
   --fill-on-tint:rgba(255,255,255,.16);     /* chips sitting on a tint    */
   --on-accent:#ffffff;                      /* content on an accent fill  */
 
   /* Tints — opaque text on tinted glass. */
-  --acc-bg:rgba(74,99,231,.10);   --acc-line:rgba(74,99,231,.28);   --acc-ring:rgba(74,99,231,.26);
+  --acc-bg:rgba(74,99,231,.10);   --acc-line:rgba(74,99,231,.28);   --acc-ring:rgba(74,99,231,.30);
   --ok-bg:rgba(47,158,99,.11);    --ok-line:rgba(47,158,99,.28);
   --warn-bg:rgba(201,138,30,.13); --warn-line:rgba(201,138,30,.32);
   --bad-bg:rgba(217,67,75,.10);   --bad-line:rgba(217,67,75,.28);
   --neu-bg:rgba(67,76,96,.09);    --neu-line:rgba(67,76,96,.20);
 
   /* Ambient colour behind the glass: three soft fields on the canvas. */
-  --tint-a:rgba(74,99,231,.22);
-  --tint-b:rgba(168,120,236,.19);
-  --tint-c:rgba(56,186,214,.17);
+  --tint-a:rgba(120,140,220,.15);
+  --tint-b:rgba(190,160,230,.11);
+  --tint-c:rgba(140,200,230,.11);
 
   /* Depth — ambient, never dramatic. */
-  --sh-1:0 1px 1.5px rgba(20,30,70,.045), 0 4px 12px rgba(20,30,70,.045);
-  --sh-2:0 1px 2px rgba(20,30,70,.055),  0 10px 24px rgba(20,30,70,.065);
-  --sh-3:0 1px 2px rgba(20,30,70,.06),   0 16px 38px rgba(20,30,70,.095);
-  --sh-4:0 2px 5px rgba(20,30,70,.07),   0 26px 60px rgba(20,30,70,.14);
-  --sh-5:0 4px 12px rgba(20,30,70,.09),  0 40px 90px rgba(20,30,70,.20);
+  --sh-1:0 1px 1px rgba(20,24,40,.03), 0 2px 8px -2px rgba(20,24,40,.05);
+  --sh-2:0 1px 1px rgba(20,24,40,.03), 0 12px 32px -16px rgba(20,24,40,.13);
+  --sh-3:0 1px 2px rgba(20,24,40,.03), 0 24px 56px -24px rgba(20,24,40,.20);
+  --sh-4:0 1px 2px rgba(20,24,40,.04), 0 36px 80px -32px rgba(20,24,40,.28);
+  --sh-5:0 2px 4px rgba(20,24,40,.05), 0 44px 96px -32px rgba(20,24,40,.34);
   --sh-inset:inset 0 1px 0 var(--edge-hi);
-  --sh-lift-1:0 1px 1.5px rgba(20,30,70,.16);
-  --sh-lift-2:0 2px 5px rgba(20,30,70,.16);
-  --sh-knob:0 1px 2px rgba(20,30,70,.28), 0 2px 6px rgba(20,30,70,.14);
-  --sh-knob-press:0 1px 3px rgba(20,30,70,.34), 0 2px 6px rgba(20,30,70,.18);
-  --sh-well:inset 0 1px 2px rgba(20,30,70,.05);
-  --sh-press:inset 0 1.5px 3px rgba(20,30,70,.10);
+  --sh-lift-1:0 1px 1.5px rgba(20,24,40,.10);
+  --sh-lift-2:0 2px 5px rgba(20,24,40,.12);
+  --sh-knob:0 1px 2px rgba(20,24,40,.24), 0 2px 6px rgba(20,24,40,.12);
+  --sh-knob-press:0 1px 3px rgba(20,24,40,.30), 0 2px 6px rgba(20,24,40,.16);
+  --sh-well:inset 0 1px 2px rgba(20,24,40,.05);
+  --sh-press:inset 0 1.5px 3px rgba(20,24,40,.10);
 
   /* Blur and saturation */
-  --blur-1:8px; --blur-2:14px; --blur-3:22px; --blur-4:30px; --blur-5:40px;
+  --blur-1:10px; --blur-2:16px; --blur-3:26px; --blur-4:36px; --blur-5:48px;
   --blur-veil:9px;
-  --sat-1:148%; --sat-2:160%; --sat-3:174%;
+  --sat-1:140%; --sat-2:160%; --sat-3:180%;
 
   /* Radii */
   --r-1:8px; --r-2:12px; --r-3:16px; --r-4:22px; --r-5:28px; --r-6:34px;
@@ -198,58 +199,58 @@ _DASHBOARD_HTML = r"""<!doctype html>
    border contrast, surfaces that stay visible without turning white. */
 :root[data-theme="dark"]{
   color-scheme:dark;
-  --bg:#0a0c13;
-  --bg-top:#141826;
-  --bg-bottom:#06070b;
-  --fg:#eef1f8; --fg-2:#aab3c7; --fg-3:#8f99ad;
-  --accent:#8c9fff; --accent-fill:#4a63e7; --accent-fg:#ffffff;
-  --accent-soft:rgba(140,159,255,.14);
-  --ok:#56d19a; --ok-fill:#2f9e63;
-  --warn:#e8b662; --warn-fill:#b87d1a;
-  --bad:#ff8d86; --bad-fill:#d9434b;
+  --bg:#0d0f15;
+  --bg-top:#12141c;
+  --bg-bottom:#0a0c11;
+  --fg:#eef0f6; --fg-2:#9aa2b1; --fg-3:#8a92a3;
+  --accent:#7f92ff; --accent-fill:#4a63e7; --accent-hover:#4f66ea; --accent-fg:#ffffff;
+  --accent-soft:rgba(127,146,255,.14);
+  --ok:#55c98a; --ok-fill:#55c98a;
+  --warn:#e2b25a; --warn-fill:#e2b25a;
+  --bad:#f0676d; --bad-fill:#f0676d;
   --info:#7fc8ef;
 
-  --glass-1:rgba(255,255,255,.060);
-  --glass-2:rgba(255,255,255,.085);
-  --glass-3:rgba(255,255,255,.105);
-  --glass-4:rgba(30,35,52,.74);
-  --glass-5:rgba(28,32,48,.84);
-  --glass-6:rgba(34,39,58,.90);
-  --pane:rgba(255,255,255,.026);
-  --pane-stuck:rgba(255,255,255,.048);
+  --glass-1:rgba(255,255,255,.045);
+  --glass-2:rgba(255,255,255,.065);
+  --glass-3:rgba(255,255,255,.085);
+  --glass-4:rgba(24,27,38,.72);
+  --glass-5:rgba(26,29,40,.86);
+  --glass-6:rgba(30,34,46,.92);
+  --pane:rgba(255,255,255,.030);
+  --pane-stuck:rgba(255,255,255,.055);
   --fill-1:rgba(255,255,255,.045);
-  --fill-2:rgba(255,255,255,.082);
-  --fill-3:rgba(255,255,255,.140);
-  --field:rgba(255,255,255,.048);
+  --fill-2:rgba(255,255,255,.070);
+  --fill-3:rgba(255,255,255,.120);
+  --field:rgba(255,255,255,.050);
   --field-hover:rgba(255,255,255,.070);
-  --field-focus:rgba(255,255,255,.090);
-  --code-bg:rgba(0,0,0,.34);
-  --scrim:rgba(3,5,9,.58);
-  --surface-solid:20,23,29;
+  --field-focus:rgba(255,255,255,.100);
+  --code-bg:rgba(0,0,0,.32);
+  --scrim:rgba(4,5,10,.55);
+  --surface-solid:18,20,28;
 
-  --line-1:rgba(190,205,255,.100);
-  --line-2:rgba(190,205,255,.170);
-  --line-3:rgba(190,205,255,.260);
-  --edge-hi:rgba(255,255,255,.18);
-  --edge-lo:rgba(255,255,255,.050);
-  --edge-hi-strong:rgba(255,255,255,.16);
+  --line-1:rgba(238,240,246,.080);
+  --line-2:rgba(238,240,246,.140);
+  --line-3:rgba(238,240,246,.220);
+  --edge-hi:rgba(255,255,255,.12);
+  --edge-lo:rgba(255,255,255,.040);
+  --edge-hi-strong:rgba(255,255,255,.20);
   --fill-on-tint:rgba(255,255,255,.16);
   --on-accent:#ffffff;
 
-  --acc-bg:rgba(140,159,255,.13); --acc-line:rgba(140,159,255,.30); --acc-ring:rgba(140,159,255,.26);
-  --ok-bg:rgba(86,209,154,.12);   --ok-line:rgba(86,209,154,.30);
-  --warn-bg:rgba(232,182,98,.12); --warn-line:rgba(232,182,98,.30);
-  --bad-bg:rgba(255,141,134,.11); --bad-line:rgba(255,141,134,.30);
-  --neu-bg:rgba(160,170,190,.11);  --neu-line:rgba(160,170,190,.22);
-  --tint-a:rgba(90,115,255,.24);
-  --tint-b:rgba(160,110,235,.17);
-  --tint-c:rgba(60,180,220,.14);
+  --acc-bg:rgba(127,146,255,.14); --acc-line:rgba(127,146,255,.32); --acc-ring:rgba(127,146,255,.35);
+  --ok-bg:rgba(85,201,138,.10);   --ok-line:rgba(85,201,138,.30);
+  --warn-bg:rgba(226,178,90,.12); --warn-line:rgba(226,178,90,.30);
+  --bad-bg:rgba(240,103,109,.10); --bad-line:rgba(240,103,109,.30);
+  --neu-bg:rgba(238,240,246,.08);  --neu-line:rgba(238,240,246,.16);
+  --tint-a:rgba(90,110,220,.12);
+  --tint-b:rgba(150,110,220,.09);
+  --tint-c:rgba(80,170,230,.08);
 
-  --sh-1:0 1px 1.5px rgba(0,0,0,.38), 0 4px 12px rgba(0,0,0,.24);
-  --sh-2:0 1px 2px rgba(0,0,0,.42),  0 10px 26px rgba(0,0,0,.32);
-  --sh-3:0 2px 4px rgba(0,0,0,.46),  0 18px 42px rgba(0,0,0,.44);
-  --sh-4:0 3px 8px rgba(0,0,0,.5),   0 28px 64px rgba(0,0,0,.56);
-  --sh-5:0 6px 16px rgba(0,0,0,.54), 0 44px 96px rgba(0,0,0,.66);
+  --sh-1:0 1px 1px rgba(0,0,0,.18), 0 2px 8px -2px rgba(0,0,0,.22);
+  --sh-2:0 1px 1px rgba(0,0,0,.18), 0 12px 32px -16px rgba(0,0,0,.48);
+  --sh-3:0 1px 2px rgba(0,0,0,.22), 0 24px 56px -24px rgba(0,0,0,.58);
+  --sh-4:0 1px 2px rgba(0,0,0,.26), 0 36px 80px -32px rgba(0,0,0,.68);
+  --sh-5:0 2px 4px rgba(0,0,0,.30), 0 44px 96px -32px rgba(0,0,0,.74);
   --sh-inset:inset 0 1px 0 var(--edge-hi);
   --sh-lift-1:0 1px 1.5px rgba(0,0,0,.30);
   --sh-lift-2:0 2px 6px rgba(0,0,0,.34);
@@ -260,58 +261,58 @@ _DASHBOARD_HTML = r"""<!doctype html>
 }
 @media (prefers-color-scheme:dark){
 :root:not([data-theme="light"]){  color-scheme:dark;
-  --bg:#0a0c13;
-  --bg-top:#141826;
-  --bg-bottom:#06070b;
-  --fg:#eef1f8; --fg-2:#aab3c7; --fg-3:#8f99ad;
-  --accent:#8c9fff; --accent-fill:#4a63e7; --accent-fg:#ffffff;
-  --accent-soft:rgba(140,159,255,.14);
-  --ok:#56d19a; --ok-fill:#2f9e63;
-  --warn:#e8b662; --warn-fill:#b87d1a;
-  --bad:#ff8d86; --bad-fill:#d9434b;
+  --bg:#0d0f15;
+  --bg-top:#12141c;
+  --bg-bottom:#0a0c11;
+  --fg:#eef0f6; --fg-2:#9aa2b1; --fg-3:#8a92a3;
+  --accent:#7f92ff; --accent-fill:#4a63e7; --accent-hover:#4f66ea; --accent-fg:#ffffff;
+  --accent-soft:rgba(127,146,255,.14);
+  --ok:#55c98a; --ok-fill:#55c98a;
+  --warn:#e2b25a; --warn-fill:#e2b25a;
+  --bad:#f0676d; --bad-fill:#f0676d;
   --info:#7fc8ef;
 
-  --glass-1:rgba(255,255,255,.060);
-  --glass-2:rgba(255,255,255,.085);
-  --glass-3:rgba(255,255,255,.105);
-  --glass-4:rgba(30,35,52,.74);
-  --glass-5:rgba(28,32,48,.84);
-  --glass-6:rgba(34,39,58,.90);
-  --pane:rgba(255,255,255,.026);
-  --pane-stuck:rgba(255,255,255,.048);
+  --glass-1:rgba(255,255,255,.045);
+  --glass-2:rgba(255,255,255,.065);
+  --glass-3:rgba(255,255,255,.085);
+  --glass-4:rgba(24,27,38,.72);
+  --glass-5:rgba(26,29,40,.86);
+  --glass-6:rgba(30,34,46,.92);
+  --pane:rgba(255,255,255,.030);
+  --pane-stuck:rgba(255,255,255,.055);
   --fill-1:rgba(255,255,255,.045);
-  --fill-2:rgba(255,255,255,.082);
-  --fill-3:rgba(255,255,255,.140);
-  --field:rgba(255,255,255,.048);
+  --fill-2:rgba(255,255,255,.070);
+  --fill-3:rgba(255,255,255,.120);
+  --field:rgba(255,255,255,.050);
   --field-hover:rgba(255,255,255,.070);
-  --field-focus:rgba(255,255,255,.090);
-  --code-bg:rgba(0,0,0,.34);
-  --scrim:rgba(3,5,9,.58);
-  --surface-solid:20,23,29;
+  --field-focus:rgba(255,255,255,.100);
+  --code-bg:rgba(0,0,0,.32);
+  --scrim:rgba(4,5,10,.55);
+  --surface-solid:18,20,28;
 
-  --line-1:rgba(190,205,255,.100);
-  --line-2:rgba(190,205,255,.170);
-  --line-3:rgba(190,205,255,.260);
-  --edge-hi:rgba(255,255,255,.18);
-  --edge-lo:rgba(255,255,255,.050);
-  --edge-hi-strong:rgba(255,255,255,.16);
+  --line-1:rgba(238,240,246,.080);
+  --line-2:rgba(238,240,246,.140);
+  --line-3:rgba(238,240,246,.220);
+  --edge-hi:rgba(255,255,255,.12);
+  --edge-lo:rgba(255,255,255,.040);
+  --edge-hi-strong:rgba(255,255,255,.20);
   --fill-on-tint:rgba(255,255,255,.16);
   --on-accent:#ffffff;
 
-  --acc-bg:rgba(140,159,255,.13); --acc-line:rgba(140,159,255,.30); --acc-ring:rgba(140,159,255,.26);
-  --ok-bg:rgba(86,209,154,.12);   --ok-line:rgba(86,209,154,.30);
-  --warn-bg:rgba(232,182,98,.12); --warn-line:rgba(232,182,98,.30);
-  --bad-bg:rgba(255,141,134,.11); --bad-line:rgba(255,141,134,.30);
-  --neu-bg:rgba(160,170,190,.11);  --neu-line:rgba(160,170,190,.22);
-  --tint-a:rgba(90,115,255,.24);
-  --tint-b:rgba(160,110,235,.17);
-  --tint-c:rgba(60,180,220,.14);
+  --acc-bg:rgba(127,146,255,.14); --acc-line:rgba(127,146,255,.32); --acc-ring:rgba(127,146,255,.35);
+  --ok-bg:rgba(85,201,138,.10);   --ok-line:rgba(85,201,138,.30);
+  --warn-bg:rgba(226,178,90,.12); --warn-line:rgba(226,178,90,.30);
+  --bad-bg:rgba(240,103,109,.10); --bad-line:rgba(240,103,109,.30);
+  --neu-bg:rgba(238,240,246,.08);  --neu-line:rgba(238,240,246,.16);
+  --tint-a:rgba(90,110,220,.12);
+  --tint-b:rgba(150,110,220,.09);
+  --tint-c:rgba(80,170,230,.08);
 
-  --sh-1:0 1px 1.5px rgba(0,0,0,.38), 0 4px 12px rgba(0,0,0,.24);
-  --sh-2:0 1px 2px rgba(0,0,0,.42),  0 10px 26px rgba(0,0,0,.32);
-  --sh-3:0 2px 4px rgba(0,0,0,.46),  0 18px 42px rgba(0,0,0,.44);
-  --sh-4:0 3px 8px rgba(0,0,0,.5),   0 28px 64px rgba(0,0,0,.56);
-  --sh-5:0 6px 16px rgba(0,0,0,.54), 0 44px 96px rgba(0,0,0,.66);
+  --sh-1:0 1px 1px rgba(0,0,0,.18), 0 2px 8px -2px rgba(0,0,0,.22);
+  --sh-2:0 1px 1px rgba(0,0,0,.18), 0 12px 32px -16px rgba(0,0,0,.48);
+  --sh-3:0 1px 2px rgba(0,0,0,.22), 0 24px 56px -24px rgba(0,0,0,.58);
+  --sh-4:0 1px 2px rgba(0,0,0,.26), 0 36px 80px -32px rgba(0,0,0,.68);
+  --sh-5:0 2px 4px rgba(0,0,0,.30), 0 44px 96px -32px rgba(0,0,0,.74);
   --sh-inset:inset 0 1px 0 var(--edge-hi);
   --sh-lift-1:0 1px 1.5px rgba(0,0,0,.30);
   --sh-lift-2:0 2px 6px rgba(0,0,0,.34);
@@ -388,8 +389,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
 .canvas-glow{
   position:absolute;inset:-24% -12% -8%;display:block;
   background:
-    radial-gradient(38% 30% at 62% 22%, rgba(255,255,255,.5), transparent 70%),
-    radial-gradient(34% 26% at 22% 62%, rgba(120,140,255,.14), transparent 72%);
+    radial-gradient(38% 30% at 62% 22%, rgba(255,255,255,.40), transparent 70%),
+    radial-gradient(34% 26% at 22% 62%, rgba(120,140,220,.10), transparent 72%);
   transform:translate3d(0,0,0);
   will-change:transform;
 }
@@ -399,15 +400,15 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
 }
 :root[data-theme="dark"] .canvas-glow{
   background:
-    radial-gradient(38% 30% at 62% 22%, rgba(147,170,255,.10), transparent 70%),
-    radial-gradient(34% 26% at 22% 62%, rgba(120,140,255,.08), transparent 72%);
+    radial-gradient(38% 30% at 62% 22%, rgba(140,160,255,.08), transparent 70%),
+    radial-gradient(34% 26% at 22% 62%, rgba(120,140,220,.07), transparent 72%);
 }
 :root[data-theme="dark"] .canvas::after{opacity:.045}
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]) .canvas-glow{
     background:
-      radial-gradient(38% 30% at 62% 22%, rgba(147,170,255,.10), transparent 70%),
-      radial-gradient(34% 26% at 22% 62%, rgba(120,140,255,.08), transparent 72%);
+      radial-gradient(38% 30% at 62% 22%, rgba(140,160,255,.08), transparent 70%),
+      radial-gradient(34% 26% at 22% 62%, rgba(120,140,220,.07), transparent 72%);
   }
   :root:not([data-theme="light"]) .canvas::after{opacity:.045}
 }
@@ -550,7 +551,9 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
 .health.is-bad{color:var(--bad);background:var(--bad-bg);border-color:var(--bad-line)}
 .dot{width:8px;height:8px;flex:0 0 8px;border-radius:50%;background:var(--fg-3);position:relative;
   transition:background-color var(--d-2) var(--e-out)}
-.dot.ok{background:var(--ok-fill)} .dot.warn{background:var(--warn-fill)} .dot.bad{background:var(--bad-fill)}
+.dot.ok{background:var(--ok-fill);box-shadow:0 0 0 3px var(--ok-bg)}
+.dot.warn{background:var(--warn-fill);box-shadow:0 0 0 3px var(--warn-bg)}
+.dot.bad{background:var(--bad-fill);box-shadow:0 0 0 3px var(--bad-bg)}
 .dot.ok::after,.dot.warn::after,.dot.bad::after{
   content:"";position:absolute;inset:0;border-radius:50%;background:currentColor}
 .dot.ok::after{background:var(--ok-fill);animation:breathe 3.1s var(--e-out) infinite}
@@ -572,9 +575,13 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
 }
 .railwrap{position:relative;min-height:0;min-width:0}
 
-/* Navigation rail — a floating glass column, not a framed sidebar. */
+/* Navigation rail — a floating glass column, not a framed sidebar. It sits at
+   the chrome layer (with the topbar): the workspace pane is a translucent
+   stacking context, so a z-auto rail would paint underneath it and swallow
+   the tab tooltips that travel across the workspace. */
 .rail{
-  position:absolute;inset:0;display:flex;flex-direction:column;gap:var(--sp-2);
+  position:absolute;inset:0;z-index:var(--z-chrome);
+  display:flex;flex-direction:column;gap:var(--sp-2);
   padding:10px;border-radius:var(--r-5);
   transition:background-color var(--d-3) var(--e-out),box-shadow var(--d-3) var(--e-out),
              border-color var(--d-3) var(--e-out);
@@ -636,7 +643,9 @@ nav.tabs .glider.ready{opacity:1}
   width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:var(--fg-3);position:relative;
   transition:background-color var(--d-2) var(--e-out);
 }
-.pulse.ok{background:var(--ok-fill)} .pulse.warn{background:var(--warn-fill)} .pulse.bad{background:var(--bad-fill)}
+.pulse.ok{background:var(--ok-fill);box-shadow:0 0 0 3px var(--ok-bg)}
+.pulse.warn{background:var(--warn-fill);box-shadow:0 0 0 3px var(--warn-bg)}
+.pulse.bad{background:var(--bad-fill);box-shadow:0 0 0 3px var(--bad-bg)}
 .pulse.ok::after,.pulse.warn::after,.pulse.bad::after{
   content:"";position:absolute;inset:0;border-radius:50%;background:inherit;
   animation:breathe 3.1s var(--e-out) infinite}
@@ -702,17 +711,22 @@ section.tab.active[data-enter="none"]{animation:panelIn var(--d-3) var(--e-enter
   /* The primary button is already bright: it needs the least light. */
   .btn--primary:hover::before{opacity:.34}
 }
+/* Primary — a top-lit accent object: the gradient is the light, the ring
+   shadow is the depth, and hover moves the fill one step via --accent-hover
+   (deeper in light, lifted in dark) instead of washing it out. */
 .btn--primary{
-  background:var(--accent-fill);color:var(--accent-fg);border-color:transparent;
-  box-shadow:var(--sh-lift-1), 0 8px 20px var(--acc-ring),
+  background:linear-gradient(180deg,color-mix(in srgb,var(--accent-fill) 86%,#fff) 0%,var(--accent-fill) 62%);
+  color:var(--accent-fg);border-color:transparent;
+  box-shadow:var(--sh-lift-1), 0 8px 20px -6px var(--acc-ring),
              inset 0 1px 0 var(--edge-hi-strong);
 }
-.btn--primary{background:linear-gradient(180deg,color-mix(in srgb,var(--accent-fill) 82%,#fff) 0%,var(--accent-fill) 66%)}
-.btn--primary:hover:not(:disabled){filter:brightness(1.07);transform:translateY(-1px);
-  box-shadow:var(--sh-lift-2), 0 14px 30px var(--acc-ring),
+.btn--primary:hover:not(:disabled){
+  background:linear-gradient(180deg,color-mix(in srgb,var(--accent-hover) 86%,#fff) 0%,var(--accent-hover) 62%);
+  transform:translateY(-1px);
+  box-shadow:var(--sh-lift-2), 0 14px 30px -8px var(--acc-ring),
              inset 0 1px 0 var(--edge-hi-strong)}
 .btn--primary:active:not(:disabled){transform:translateY(0) scale(.978);
-  box-shadow:var(--sh-lift-1), 0 3px 10px var(--acc-ring),
+  box-shadow:var(--sh-lift-1), 0 3px 10px -4px var(--acc-ring),
              inset 0 1px 0 var(--edge-hi-strong)}
 .btn--glass{
   background:var(--glass-3);color:var(--fg);border-color:var(--line-1);
@@ -820,7 +834,7 @@ select{
   transform-origin:center bottom;
   transition:transform var(--d-2) var(--e-out), opacity var(--d-1) var(--e-out);
 }
-.switch input:checked + .sw{background:var(--accent-fill);border-color:transparent;box-shadow:none}
+.switch input:checked + .sw{background:var(--accent-fill);border-color:transparent;box-shadow:inset 0 1px 0 rgba(255,255,255,.20)}
 .switch input:checked + .sw::after{transform:translateX(var(--sw-travel))}
 .switch input:checked + .sw::before{opacity:1;transform:translateX(calc(var(--sw-travel) / 2)) rotate(45deg) scaleY(1);
   transition:transform var(--d-2) var(--e-out) 60ms, opacity var(--d-1) var(--e-out) 60ms}
@@ -1123,15 +1137,22 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
 .msg-time{font-size:var(--fs-micro);color:var(--fg-3);font-variant-numeric:tabular-nums}
 .msg .bub{font-size:var(--fs-body);line-height:1.7;overflow-wrap:anywhere;min-width:0}
 .msg.assistant .bub{padding:0 2px}
+/* The user's own words sit on solid accent glass, lit from the top edge, so
+   the bubble reads as an object floating over the transcript rather than a
+   tinted label. White on the accent fill holds ~5:1 in both schemes. */
 .msg.user .bub{
   display:inline-block;max-width:min(100%,72ch);
-  background:var(--acc-bg);border:1px solid var(--acc-line);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--accent-fill) 88%,#fff),var(--accent-fill));
+  color:var(--accent-fg);
+  border:1px solid color-mix(in srgb,var(--accent-fill) 86%,#000);
   border-radius:var(--r-3);border-top-left-radius:var(--r-1);
-  padding:11px 15px;box-shadow:var(--sh-inset);
+  padding:11px 15px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22), 0 8px 24px -12px var(--acc-ring);
   -webkit-backdrop-filter:blur(var(--blur-1)) saturate(var(--sat-1));
   backdrop-filter:blur(var(--blur-1)) saturate(var(--sat-1));
 }
-.msg.user .bub{background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 17%,transparent),var(--acc-bg) 78%)}
+.msg.user .bub ::selection{background:rgba(255,255,255,.32)}
+.msg.user .bub code{background:rgba(255,255,255,.18);border-color:transparent;color:inherit}
 .msg.err .bub{
   background:var(--bad-bg);border:1px solid var(--bad-line);color:var(--bad);
   border-radius:var(--r-3);border-top-left-radius:var(--r-1);padding:11px 15px;
@@ -1167,7 +1188,7 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
 .thread-anchor::before,.thread-anchor::after{content:"";height:1px;flex:1;background:var(--line-1)}
 
 .tobottom{
-  position:absolute;right:18px;bottom:16px;z-index:3;
+  position:absolute;right:18px;bottom:16px;z-index:var(--z-panel);
   width:38px;height:38px;border-radius:var(--r-full);cursor:pointer;
   display:grid;place-items:center;color:var(--fg);
   background:var(--glass-5);border:1px solid var(--line-2);
@@ -1244,7 +1265,7 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
 .chart-head .sub{font-size:var(--fs-meta);color:var(--fg-3)}
 .chart-head .spacer{flex:1}
 .chart-legend{display:flex;align-items:center;gap:6px;font-size:var(--fs-micro);color:var(--fg-3)}
-.chart-legend .swatch{width:9px;height:9px;border-radius:3px;background:var(--accent);opacity:.62}
+.chart-legend .swatch{width:9px;height:9px;border-radius:3px;background:var(--accent-fill);opacity:.72}
 .plot{position:relative;padding-left:44px;padding-bottom:20px;min-height:150px}
 .gridlines{position:absolute;inset:0 0 20px 44px;display:flex;flex-direction:column;
   justify-content:space-between;pointer-events:none}
@@ -1261,8 +1282,8 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
 .bar .fill{
   width:100%;border-radius:7px 7px 3px 3px;
   background:var(--accent);opacity:.72;
-  background:linear-gradient(180deg, color-mix(in srgb,var(--accent) 78%,transparent),
-             color-mix(in srgb,var(--accent) 34%,transparent));
+  background:linear-gradient(180deg, color-mix(in srgb,var(--accent-fill) 80%,transparent),
+             color-mix(in srgb,var(--accent-fill) 38%,transparent));
   opacity:1;border:1px solid var(--acc-line);border-bottom:0;
   height:max(3px,var(--h));transform-origin:bottom;
   animation:barGrow var(--d-5) var(--e-enter) backwards;animation-delay:calc(var(--i,0) * 34ms);
@@ -1275,6 +1296,15 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
   font-family:var(--mono);font-size:10px;color:var(--fg-3);
 }
 .bar[data-tip]::after{bottom:calc(100% + 6px)}
+/* Edge bars anchor their tooltip inward, so it never clips at the pane's
+   edge (the pane is a scroll container with overflow-x hidden). */
+.bar:first-child[data-tip]::after,.bar:nth-child(2)[data-tip]::after{
+  left:0;transform:translate(0,3px) scale(.98);transform-origin:bottom left;
+}
+.bar:first-child[data-tip]:hover::after,.bar:first-child[data-tip]:focus-visible::after,
+.bar:nth-child(2)[data-tip]:hover::after,.bar:nth-child(2)[data-tip]:focus-visible::after{transform:translate(0,0) scale(1)}
+.bar:nth-last-child(-n+2)[data-tip]::after{left:auto;right:0;transform:translate(0,3px) scale(.98);transform-origin:bottom right}
+.bar:nth-last-child(-n+2)[data-tip]:hover::after,.bar:nth-last-child(-n+2)[data-tip]:focus-visible::after{transform:translate(0,0) scale(1)}
 /* The busiest bucket is labelled in place, so the chart answers its own
    question without a hover. */
 .bar .peak{
@@ -1788,7 +1818,7 @@ table.stack-rows td[data-label=""]::before{display:none}
       </div>
 
       <button class="btn btn--quiet btn--icon" id="helpBtn" type="button" aria-label="Keyboard shortcuts"
-              data-tip="Keyboard shortcuts (?)" data-tip-pos="below">
+              data-tip="Keyboard shortcuts (?)" data-tip-pos="left">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="8.6"/><path d="M9.7 9.5a2.4 2.4 0 1 1 3.2 2.2c-.7.3-1 .9-1 1.6v.5M12 16.8h.01"/>
         </svg>
@@ -1931,7 +1961,7 @@ table.stack-rows td[data-label=""]::before{display:none}
                 <textarea id="prompt" rows="1" placeholder="Ask something&hellip;" enterkeyhint="send"></textarea>
                 <div class="well-foot">
                   <button class="btn btn--quiet-danger btn--sm" id="clearConv" type="button"
-                          data-tip="Clear this chat" data-tip-pos="below">
+                          data-tip="Clear this chat" data-tip-pos="right">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                       <path d="M5 7.6h14M9.6 7.6V5.9c0-.7.6-1.3 1.3-1.3h2.2c.7 0 1.3.6 1.3 1.3v1.7M6.9 7.6l.8 10.2c.06.8.73 1.4 1.53 1.4h5.54c.8 0 1.47-.6 1.53-1.4l.8-10.2"/>
                     </svg>
@@ -1940,7 +1970,7 @@ table.stack-rows td[data-label=""]::before{display:none}
                   <span class="hint"><kbd>Enter</kbd> send &middot; <kbd>Shift</kbd>+<kbd>Enter</kbd> new line</span>
                   <div class="spacer"></div>
                   <span class="slot">
-                    <button class="btn btn--primary" id="send" type="button" data-tip="Send — Enter" data-tip-pos="below">
+                    <button class="btn btn--primary" id="send" type="button" data-tip="Send — Enter" data-tip-pos="left">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M12 19V5.6M12 5.6 6.2 11.4M12 5.6l5.8 5.8"/>
                       </svg>
