@@ -51,8 +51,8 @@ _DASHBOARD_HTML = r"""<!doctype html>
 <title>gemini-web2api</title>
 <meta name="description" content="gemini-web2api console — chat, accounts and request activity for the Gemini Web → OpenAI-compatible API gateway.">
 <meta name="robots" content="noindex">
-<meta name="theme-color" content="#e8ebf0" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#080a0e" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#e9edf5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0a0c13" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%234285f4'/%3E%3Cstop offset='.5' stop-color='%239b72cb'/%3E%3Cstop offset='1' stop-color='%23d96570'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath fill='url(%23g)' d='M16 2C17 10.2 21.8 15 30 16C21.8 17 17 21.8 16 30C15 21.8 10.2 17 2 16C10.2 15 15 10.2 16 2Z'/%3E%3C/svg%3E">
 <style>
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -81,27 +81,29 @@ _DASHBOARD_HTML = r"""<!doctype html>
   color-scheme:light;
 
   /* Ink. Text is never translucent; only surfaces are. */
-  --bg:#e8ebf0;
-  --bg-top:#f3f5f9;
-  --bg-bottom:#e1e6ee;
-  --fg:#0f131a;
-  --fg-2:#4b5462;
-  --fg-3:#5c6675;
-  --accent:#2b4ecb;
-  --accent-fill:#3357d6;
+  --bg:#e9edf5;
+  --bg-top:#f7f9fd;
+  --bg-bottom:#dce3f0;
+  --fg:#0e1322;
+  --fg-2:#434c60;
+  --fg-3:#5a6479;
+  /* Text accents are a half-step deeper than the fills so small labels clear
+     4.5:1 on the tinted canvas; the fills carry the brighter GlassGem shades. */
+  --accent:#3a52d4;
+  --accent-fill:#4a63e7;
   --accent-fg:#ffffff;
-  --accent-soft:rgba(43,78,203,.10);
-  --ok:#116b46;  --ok-fill:#14774e;
-  --warn:#7b5400;--warn-fill:#8a5f04;
-  --bad:#ad2531; --bad-fill:#b62a36;
-  --info:#175c88;
+  --accent-soft:rgba(74,99,231,.11);
+  --ok:#17704a;  --ok-fill:#2f9e63;
+  --warn:#855600; --warn-fill:#c98a1e;
+  --bad:#b5262f; --bad-fill:#d9434b;
+  --info:#1d6896;
 
   /* Materials — one system, six strengths. Elevation picks the strength. */
-  --glass-1:rgba(255,255,255,.48);   /* inset tiles, cards, list surfaces   */
-  --glass-2:rgba(255,255,255,.62);   /* panels, transcript, tables          */
-  --glass-3:rgba(255,255,255,.74);   /* chrome: topbar, rail, sticky heads  */
-  --glass-4:rgba(255,255,255,.85);   /* popovers, menus, tooltips           */
-  --glass-5:rgba(254,255,255,.90);   /* dialogs and sheets                  */
+  --glass-1:rgba(255,255,255,.44);   /* inset tiles, cards, list surfaces   */
+  --glass-2:rgba(255,255,255,.58);   /* panels, transcript, tables          */
+  --glass-3:rgba(255,255,255,.70);   /* chrome: topbar, rail, sticky heads  */
+  --glass-4:rgba(255,255,255,.82);   /* popovers, menus, tooltips           */
+  --glass-5:rgba(254,255,255,.89);   /* dialogs and sheets                  */
   --glass-6:rgba(255,255,255,.93);   /* toasts, highest layer               */
   --pane:rgba(255,255,255,.34);      /* the workspace the panels sit on     */
   --pane-stuck:rgba(255,255,255,.52);
@@ -116,10 +118,10 @@ _DASHBOARD_HTML = r"""<!doctype html>
   --surface-solid:249,250,252;      /* rgb triplet: opaque fallback surface  */
 
   /* Hairlines and edge light. A border defines; it never decorates. */
-  --line-1:rgba(15,20,33,.090);
-  --line-2:rgba(15,20,33,.150);
-  --line-3:rgba(15,20,33,.240);
-  --edge-hi:rgba(255,255,255,.92);
+  --line-1:rgba(24,36,72,.085);
+  --line-2:rgba(24,36,72,.150);
+  --line-3:rgba(24,36,72,.240);
+  --edge-hi:rgba(255,255,255,.98);
   --edge-lo:rgba(255,255,255,.28);
   --edge-hi-strong:rgba(255,255,255,.20);  /* highlight on a tinted fill */
   --sheen:rgba(255,255,255,.34);            /* pointer light, specular    */
@@ -128,25 +130,30 @@ _DASHBOARD_HTML = r"""<!doctype html>
   --on-accent:#ffffff;                      /* content on an accent fill  */
 
   /* Tints — opaque text on tinted glass. */
-  --acc-bg:rgba(43,78,203,.10);   --acc-line:rgba(43,78,203,.26);   --acc-ring:rgba(43,78,203,.22);
-  --ok-bg:rgba(17,107,70,.10);    --ok-line:rgba(17,107,70,.26);
-  --warn-bg:rgba(138,95,4,.11);   --warn-line:rgba(138,95,4,.28);
-  --bad-bg:rgba(173,37,49,.09);   --bad-line:rgba(173,37,49,.26);
-  --neu-bg:rgba(75,84,98,.09);    --neu-line:rgba(75,84,98,.20);
+  --acc-bg:rgba(74,99,231,.10);   --acc-line:rgba(74,99,231,.28);   --acc-ring:rgba(74,99,231,.26);
+  --ok-bg:rgba(47,158,99,.11);    --ok-line:rgba(47,158,99,.28);
+  --warn-bg:rgba(201,138,30,.13); --warn-line:rgba(201,138,30,.32);
+  --bad-bg:rgba(217,67,75,.10);   --bad-line:rgba(217,67,75,.28);
+  --neu-bg:rgba(67,76,96,.09);    --neu-line:rgba(67,76,96,.20);
+
+  /* Ambient colour behind the glass: three soft fields on the canvas. */
+  --tint-a:rgba(74,99,231,.22);
+  --tint-b:rgba(168,120,236,.19);
+  --tint-c:rgba(56,186,214,.17);
 
   /* Depth — ambient, never dramatic. */
-  --sh-1:0 1px 1.5px rgba(15,20,34,.045), 0 4px 12px rgba(15,20,34,.045);
-  --sh-2:0 1px 2px rgba(15,20,34,.055),  0 10px 24px rgba(15,20,34,.065);
-  --sh-3:0 1px 2px rgba(15,20,34,.06),   0 16px 38px rgba(15,20,34,.095);
-  --sh-4:0 2px 5px rgba(15,20,34,.07),   0 26px 60px rgba(15,20,34,.14);
-  --sh-5:0 4px 12px rgba(15,20,34,.09),  0 40px 90px rgba(15,20,34,.20);
+  --sh-1:0 1px 1.5px rgba(20,30,70,.045), 0 4px 12px rgba(20,30,70,.045);
+  --sh-2:0 1px 2px rgba(20,30,70,.055),  0 10px 24px rgba(20,30,70,.065);
+  --sh-3:0 1px 2px rgba(20,30,70,.06),   0 16px 38px rgba(20,30,70,.095);
+  --sh-4:0 2px 5px rgba(20,30,70,.07),   0 26px 60px rgba(20,30,70,.14);
+  --sh-5:0 4px 12px rgba(20,30,70,.09),  0 40px 90px rgba(20,30,70,.20);
   --sh-inset:inset 0 1px 0 var(--edge-hi);
-  --sh-lift-1:0 1px 1.5px rgba(15,20,34,.16);
-  --sh-lift-2:0 2px 5px rgba(15,20,34,.16);
-  --sh-knob:0 1px 2px rgba(15,20,34,.28), 0 2px 6px rgba(15,20,34,.14);
-  --sh-knob-press:0 1px 3px rgba(15,20,34,.34), 0 2px 6px rgba(15,20,34,.18);
-  --sh-well:inset 0 1px 2px rgba(15,20,34,.05);
-  --sh-press:inset 0 1.5px 3px rgba(15,20,34,.10);
+  --sh-lift-1:0 1px 1.5px rgba(20,30,70,.16);
+  --sh-lift-2:0 2px 5px rgba(20,30,70,.16);
+  --sh-knob:0 1px 2px rgba(20,30,70,.28), 0 2px 6px rgba(20,30,70,.14);
+  --sh-knob-press:0 1px 3px rgba(20,30,70,.34), 0 2px 6px rgba(20,30,70,.18);
+  --sh-well:inset 0 1px 2px rgba(20,30,70,.05);
+  --sh-press:inset 0 1.5px 3px rgba(20,30,70,.10);
 
   /* Blur and saturation */
   --blur-1:8px; --blur-2:14px; --blur-3:22px; --blur-4:30px; --blur-5:40px;
@@ -191,25 +198,25 @@ _DASHBOARD_HTML = r"""<!doctype html>
    border contrast, surfaces that stay visible without turning white. */
 :root[data-theme="dark"]{
   color-scheme:dark;
-  --bg:#080a0e;
-  --bg-top:#0e1118;
-  --bg-bottom:#06080b;
-  --fg:#e8ecf3; --fg-2:#a3adbc; --fg-3:#8e98a8;
-  --accent:#93aaff; --accent-fill:#3557d6; --accent-fg:#ffffff;
-  --accent-soft:rgba(147,170,255,.14);
-  --ok:#4fcb8d; --ok-fill:#2f9d68;
-  --warn:#e3b063; --warn-fill:#a5761a;
-  --bad:#ff8b83; --bad-fill:#c0392f;
-  --info:#7cc4ea;
+  --bg:#0a0c13;
+  --bg-top:#141826;
+  --bg-bottom:#06070b;
+  --fg:#eef1f8; --fg-2:#aab3c7; --fg-3:#8f99ad;
+  --accent:#8c9fff; --accent-fill:#4a63e7; --accent-fg:#ffffff;
+  --accent-soft:rgba(140,159,255,.14);
+  --ok:#56d19a; --ok-fill:#2f9e63;
+  --warn:#e8b662; --warn-fill:#b87d1a;
+  --bad:#ff8d86; --bad-fill:#d9434b;
+  --info:#7fc8ef;
 
-  --glass-1:rgba(255,255,255,.052);
-  --glass-2:rgba(255,255,255,.070);
-  --glass-3:rgba(255,255,255,.085);
-  --glass-4:rgba(38,43,52,.78);
-  --glass-5:rgba(30,34,42,.86);
-  --glass-6:rgba(36,41,50,.90);
-  --pane:rgba(255,255,255,.022);
-  --pane-stuck:rgba(255,255,255,.040);
+  --glass-1:rgba(255,255,255,.060);
+  --glass-2:rgba(255,255,255,.085);
+  --glass-3:rgba(255,255,255,.105);
+  --glass-4:rgba(30,35,52,.74);
+  --glass-5:rgba(28,32,48,.84);
+  --glass-6:rgba(34,39,58,.90);
+  --pane:rgba(255,255,255,.026);
+  --pane-stuck:rgba(255,255,255,.048);
   --fill-1:rgba(255,255,255,.045);
   --fill-2:rgba(255,255,255,.082);
   --fill-3:rgba(255,255,255,.140);
@@ -220,20 +227,23 @@ _DASHBOARD_HTML = r"""<!doctype html>
   --scrim:rgba(3,5,9,.58);
   --surface-solid:20,23,29;
 
-  --line-1:rgba(255,255,255,.090);
-  --line-2:rgba(255,255,255,.155);
-  --line-3:rgba(255,255,255,.235);
-  --edge-hi:rgba(255,255,255,.14);
-  --edge-lo:rgba(255,255,255,.045);
+  --line-1:rgba(190,205,255,.100);
+  --line-2:rgba(190,205,255,.170);
+  --line-3:rgba(190,205,255,.260);
+  --edge-hi:rgba(255,255,255,.18);
+  --edge-lo:rgba(255,255,255,.050);
   --edge-hi-strong:rgba(255,255,255,.16);
   --fill-on-tint:rgba(255,255,255,.16);
   --on-accent:#ffffff;
 
-  --acc-bg:rgba(147,170,255,.13); --acc-line:rgba(147,170,255,.30); --acc-ring:rgba(147,170,255,.26);
-  --ok-bg:rgba(79,203,141,.12);   --ok-line:rgba(79,203,141,.30);
-  --warn-bg:rgba(227,176,99,.12); --warn-line:rgba(227,176,99,.30);
-  --bad-bg:rgba(255,139,131,.11); --bad-line:rgba(255,139,131,.30);
+  --acc-bg:rgba(140,159,255,.13); --acc-line:rgba(140,159,255,.30); --acc-ring:rgba(140,159,255,.26);
+  --ok-bg:rgba(86,209,154,.12);   --ok-line:rgba(86,209,154,.30);
+  --warn-bg:rgba(232,182,98,.12); --warn-line:rgba(232,182,98,.30);
+  --bad-bg:rgba(255,141,134,.11); --bad-line:rgba(255,141,134,.30);
   --neu-bg:rgba(160,170,190,.11);  --neu-line:rgba(160,170,190,.22);
+  --tint-a:rgba(90,115,255,.24);
+  --tint-b:rgba(160,110,235,.17);
+  --tint-c:rgba(60,180,220,.14);
 
   --sh-1:0 1px 1.5px rgba(0,0,0,.38), 0 4px 12px rgba(0,0,0,.24);
   --sh-2:0 1px 2px rgba(0,0,0,.42),  0 10px 26px rgba(0,0,0,.32);
@@ -250,25 +260,25 @@ _DASHBOARD_HTML = r"""<!doctype html>
 }
 @media (prefers-color-scheme:dark){
 :root:not([data-theme="light"]){  color-scheme:dark;
-  --bg:#080a0e;
-  --bg-top:#0e1118;
-  --bg-bottom:#06080b;
-  --fg:#e8ecf3; --fg-2:#a3adbc; --fg-3:#8e98a8;
-  --accent:#93aaff; --accent-fill:#3557d6; --accent-fg:#ffffff;
-  --accent-soft:rgba(147,170,255,.14);
-  --ok:#4fcb8d; --ok-fill:#2f9d68;
-  --warn:#e3b063; --warn-fill:#a5761a;
-  --bad:#ff8b83; --bad-fill:#c0392f;
-  --info:#7cc4ea;
+  --bg:#0a0c13;
+  --bg-top:#141826;
+  --bg-bottom:#06070b;
+  --fg:#eef1f8; --fg-2:#aab3c7; --fg-3:#8f99ad;
+  --accent:#8c9fff; --accent-fill:#4a63e7; --accent-fg:#ffffff;
+  --accent-soft:rgba(140,159,255,.14);
+  --ok:#56d19a; --ok-fill:#2f9e63;
+  --warn:#e8b662; --warn-fill:#b87d1a;
+  --bad:#ff8d86; --bad-fill:#d9434b;
+  --info:#7fc8ef;
 
-  --glass-1:rgba(255,255,255,.052);
-  --glass-2:rgba(255,255,255,.070);
-  --glass-3:rgba(255,255,255,.085);
-  --glass-4:rgba(38,43,52,.78);
-  --glass-5:rgba(30,34,42,.86);
-  --glass-6:rgba(36,41,50,.90);
-  --pane:rgba(255,255,255,.022);
-  --pane-stuck:rgba(255,255,255,.040);
+  --glass-1:rgba(255,255,255,.060);
+  --glass-2:rgba(255,255,255,.085);
+  --glass-3:rgba(255,255,255,.105);
+  --glass-4:rgba(30,35,52,.74);
+  --glass-5:rgba(28,32,48,.84);
+  --glass-6:rgba(34,39,58,.90);
+  --pane:rgba(255,255,255,.026);
+  --pane-stuck:rgba(255,255,255,.048);
   --fill-1:rgba(255,255,255,.045);
   --fill-2:rgba(255,255,255,.082);
   --fill-3:rgba(255,255,255,.140);
@@ -279,20 +289,23 @@ _DASHBOARD_HTML = r"""<!doctype html>
   --scrim:rgba(3,5,9,.58);
   --surface-solid:20,23,29;
 
-  --line-1:rgba(255,255,255,.090);
-  --line-2:rgba(255,255,255,.155);
-  --line-3:rgba(255,255,255,.235);
-  --edge-hi:rgba(255,255,255,.14);
-  --edge-lo:rgba(255,255,255,.045);
+  --line-1:rgba(190,205,255,.100);
+  --line-2:rgba(190,205,255,.170);
+  --line-3:rgba(190,205,255,.260);
+  --edge-hi:rgba(255,255,255,.18);
+  --edge-lo:rgba(255,255,255,.050);
   --edge-hi-strong:rgba(255,255,255,.16);
   --fill-on-tint:rgba(255,255,255,.16);
   --on-accent:#ffffff;
 
-  --acc-bg:rgba(147,170,255,.13); --acc-line:rgba(147,170,255,.30); --acc-ring:rgba(147,170,255,.26);
-  --ok-bg:rgba(79,203,141,.12);   --ok-line:rgba(79,203,141,.30);
-  --warn-bg:rgba(227,176,99,.12); --warn-line:rgba(227,176,99,.30);
-  --bad-bg:rgba(255,139,131,.11); --bad-line:rgba(255,139,131,.30);
+  --acc-bg:rgba(140,159,255,.13); --acc-line:rgba(140,159,255,.30); --acc-ring:rgba(140,159,255,.26);
+  --ok-bg:rgba(86,209,154,.12);   --ok-line:rgba(86,209,154,.30);
+  --warn-bg:rgba(232,182,98,.12); --warn-line:rgba(232,182,98,.30);
+  --bad-bg:rgba(255,141,134,.11); --bad-line:rgba(255,141,134,.30);
   --neu-bg:rgba(160,170,190,.11);  --neu-line:rgba(160,170,190,.22);
+  --tint-a:rgba(90,115,255,.24);
+  --tint-b:rgba(160,110,235,.17);
+  --tint-c:rgba(60,180,220,.14);
 
   --sh-1:0 1px 1.5px rgba(0,0,0,.38), 0 4px 12px rgba(0,0,0,.24);
   --sh-2:0 1px 2px rgba(0,0,0,.42),  0 10px 26px rgba(0,0,0,.32);
@@ -360,14 +373,16 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
 }
 .skip:focus{left:16px;top:16px}
 
-/* Canvas — ambient colour fields so glass has something to refract. Almost
-   invisible until a surface moves over it; the halo drifts on scroll only. */
+/* Canvas — the ambient light the glass refracts. Three tinted fields come
+   from tokens, so both schemes share one recipe; every translucent surface
+   picks them up as the colour behind it. Almost invisible until a surface
+   moves over it; the halo drifts on scroll only. */
 .canvas{
   position:fixed;inset:0;z-index:var(--z-canvas);pointer-events:none;overflow:hidden;
   background:
-    radial-gradient(60% 46% at 84% 0%, rgba(63,99,224,.16), transparent 64%),
-    radial-gradient(46% 38% at 4% 12%, rgba(133,96,214,.12), transparent 66%),
-    radial-gradient(64% 48% at 42% 108%, rgba(24,150,116,.10), transparent 68%),
+    radial-gradient(60% 46% at 84% 0%, var(--tint-a), transparent 64%),
+    radial-gradient(46% 38% at 4% 12%, var(--tint-b), transparent 66%),
+    radial-gradient(64% 48% at 42% 108%, var(--tint-c), transparent 68%),
     linear-gradient(178deg, var(--bg-top) 0%, var(--bg) 46%, var(--bg-bottom) 100%);
 }
 .canvas-glow{
@@ -382,13 +397,6 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
   content:"";position:absolute;inset:0;opacity:.030;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
 }
-:root[data-theme="dark"] .canvas{
-  background:
-    radial-gradient(60% 46% at 84% 0%, rgba(88,120,255,.15), transparent 64%),
-    radial-gradient(46% 38% at 4% 12%, rgba(140,102,226,.12), transparent 66%),
-    radial-gradient(64% 48% at 42% 108%, rgba(30,150,116,.11), transparent 68%),
-    linear-gradient(178deg, var(--bg-top) 0%, var(--bg) 46%, var(--bg-bottom) 100%);
-}
 :root[data-theme="dark"] .canvas-glow{
   background:
     radial-gradient(38% 30% at 62% 22%, rgba(147,170,255,.10), transparent 70%),
@@ -396,13 +404,6 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
 }
 :root[data-theme="dark"] .canvas::after{opacity:.045}
 @media (prefers-color-scheme:dark){
-  :root:not([data-theme="light"]) .canvas{
-    background:
-      radial-gradient(60% 46% at 84% 0%, rgba(88,120,255,.15), transparent 64%),
-      radial-gradient(46% 38% at 4% 12%, rgba(140,102,226,.12), transparent 66%),
-      radial-gradient(64% 48% at 42% 108%, rgba(30,150,116,.11), transparent 68%),
-      linear-gradient(178deg, var(--bg-top) 0%, var(--bg) 46%, var(--bg-bottom) 100%);
-  }
   :root:not([data-theme="light"]) .canvas-glow{
     background:
       radial-gradient(38% 30% at 62% 22%, rgba(147,170,255,.10), transparent 70%),
@@ -706,6 +707,7 @@ section.tab.active[data-enter="none"]{animation:panelIn var(--d-3) var(--e-enter
   box-shadow:var(--sh-lift-1), 0 8px 20px var(--acc-ring),
              inset 0 1px 0 var(--edge-hi-strong);
 }
+.btn--primary{background:linear-gradient(180deg,color-mix(in srgb,var(--accent-fill) 82%,#fff) 0%,var(--accent-fill) 66%)}
 .btn--primary:hover:not(:disabled){filter:brightness(1.07);transform:translateY(-1px);
   box-shadow:var(--sh-lift-2), 0 14px 30px var(--acc-ring),
              inset 0 1px 0 var(--edge-hi-strong)}
@@ -1129,6 +1131,7 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
   -webkit-backdrop-filter:blur(var(--blur-1)) saturate(var(--sat-1));
   backdrop-filter:blur(var(--blur-1)) saturate(var(--sat-1));
 }
+.msg.user .bub{background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 17%,transparent),var(--acc-bg) 78%)}
 .msg.err .bub{
   background:var(--bad-bg);border:1px solid var(--bad-line);color:var(--bad);
   border-radius:var(--r-3);border-top-left-radius:var(--r-1);padding:11px 15px;

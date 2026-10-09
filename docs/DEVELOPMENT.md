@@ -317,11 +317,11 @@ on a *smaller* suite, so a `MANIFEST.in` that shipped fewer test files would
 otherwise look green while quietly covering less. Dropping one test module from
 the manifest was verified to fail the step with
 `ran=460 expected=518`. Locally the same run
-reports 23 skips rather than 12 unless `httpx` is installed, because the
+reports 26 skips rather than 15 unless `httpx` is installed, because the
 incremental-streaming tests gate on it — CI installs it first.
 
-Expect **677 tests and 12 skips** from an extracted sdist: 5 git-dependent and
-7 repository-metadata. Anything else means either a file stopped shipping or a
+Expect **717 tests and 15 skips** from an extracted sdist: 5 git-dependent and
+10 repository-metadata. Anything else means either a file stopped shipping or a
 guard started skipping for a new reason. `test_the_sdist_ships_every_file_the_docs_promise`
 guards the first half automatically.
 

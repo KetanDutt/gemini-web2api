@@ -76,6 +76,22 @@ Studio, ChatBox, NextChat, LobeChat, the OpenAI SDK, Codex CLI, Gemini CLI.
 virtual environment, installs dependencies, writes a `config.json` bound to
 `127.0.0.1`, starts the server and opens the dashboard. Nothing else to do.
 
+### Windows application (`.exe`)
+
+To build a standalone program that needs no Python on the target machine, run
+[`build_windows.bat`](build_windows.bat) on Windows (Python 3.8+ must be
+installed for the build). It creates `.venv-build`, bundles the server with
+PyInstaller and writes:
+
+- `dist\windows\gemini-web2api\gemini-web2api.exe` — folder build (default, starts faster)
+- `dist\windows\gemini-web2api-<version>-windows-x64.zip` — portable archive
+
+Options: `--onefile` for a single `.exe`, `--clean` to rebuild from scratch,
+`--dry-run` to print the plan without building. The executable runs from its own
+folder, writes a localhost-only `config.json` on first run and opens the
+dashboard; pass `--no-browser` to skip the browser. PyInstaller cannot
+cross-compile, so build on Windows (CI builds it on `windows-latest`).
+
 **macOS / Linux**
 
 ```bash
@@ -443,7 +459,7 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api tests
 ```
 
-677 tests, all offline — the Gemini wire protocol is faked at the frame level.
+717 tests, all offline — the Gemini wire protocol is faked at the frame level.
 CI covers Python 3.8–3.13, a stdlib-only run with no third-party packages, a
 build-and-install-the-wheel check, lint and a Docker build.
 

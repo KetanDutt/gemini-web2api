@@ -7,6 +7,9 @@ include LICENSE
 include requirements.txt
 include config.example.json
 include start.bat
+# The Windows application build: linked from README.md, so it must ship too.
+include build_windows.bat
+include requirements-windows-build.txt
 
 # The shipped documentation tells the reader to use these, so an sdist without
 # them is a distribution that contradicts its own docs:

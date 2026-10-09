@@ -1,0 +1,9 @@
+# Build-only tools for the Windows executable (scripts/build_windows.py).
+# These are installed into .venv-build, never into the runtime .venv, and are
+# not needed to run or test the server.
+#
+# PyInstaller 6.10 is the first release that supports Python 3.13; 6.x still
+# supports the Python 3.8 floor the project declares.
+pyinstaller>=6.10
+# Converts logo.png (a JPEG with a .png name) into the executable's icon.
+pillow>=10.4
