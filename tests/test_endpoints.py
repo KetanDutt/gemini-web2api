@@ -705,8 +705,8 @@ class ResponsesApiTests(ServerTestCase):
         self.assertEqual(item["call_id"], "call_test")
         self.assertEqual(item["arguments"], '{"city":"Shanghai"}')
 
-    @mock.patch("gemini_web2api.server.generate", return_value="hello")
-    def test_stream_event_sequence(self, _generate):
+    @mock.patch("gemini_web2api.server.generate_stream", return_value=iter(["hello"]))
+    def test_stream_event_sequence(self, _generate_stream):
         status, headers, body = self.post("/v1/responses", {
             "model": "gemini-3.6-flash", "input": "hello", "stream": True})
         self.assertEqual(status, 200)

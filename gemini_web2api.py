@@ -17,7 +17,7 @@ Equivalent to::
 
 Quick start::
 
-    pip install httpx        # optional, but required for real streaming
+    pip install httpx        # optional; the stdlib transport streams too
     python gemini_web2api.py
 
 Then point any OpenAI client at ``http://localhost:8081/v1``.

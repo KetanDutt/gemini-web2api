@@ -74,13 +74,18 @@ def normalize_tools(tools):
 
 def _render_tool_schema(tool_defs):
     """Serialise tool definitions, trimming parameters when they are huge."""
-    rendered = json.dumps(tool_defs, indent=2, ensure_ascii=False)
+    # Compact rather than indented: this text is prompt, so every whitespace
+    # run is tokens the upstream has to prefill before it can answer, and a
+    # client with many tools sends tens of KB of schema on every turn of the
+    # conversation. Pretty-printing bought the model nothing — JSON is JSON
+    # to a language model — at a ~20-30% larger prompt on tool-heavy calls.
+    rendered = json.dumps(tool_defs, ensure_ascii=False, separators=(",", ":"))
     if len(rendered) <= MAX_TOOL_SCHEMA_CHARS:
         return rendered
     slim = [{"name": t["name"], "description": t["description"]} for t in tool_defs]
     log(f"Tool schema too large ({len(rendered)} chars for {len(tool_defs)} tools); "
         "parameters stripped", "warning")
-    return json.dumps(slim, indent=2, ensure_ascii=False)
+    return json.dumps(slim, ensure_ascii=False, separators=(",", ":"))
 
 
 def build_tool_prompt(tool_defs, fence=OPENAI_FENCE, arg_key="arguments"):
@@ -278,9 +283,22 @@ def parse_tool_calls(text):
 
 # ─── Google-native conversion ────────────────────────────────────────────────
 
+def _as_dict(value):
+    """``value`` if it is a dict, else an empty one.
+
+    Client JSON is only guaranteed to be *an* object at the top level; a
+    nested field sent as a string or a list used to crash the conversion
+    with AttributeError and surface as a 500 for what is a client error.
+    Treating a malformed nested field as absent keeps the failure mode
+    "the field was ignored" — and the empty-prompt check still answers 400
+    when nothing usable remains.
+    """
+    return value if isinstance(value, dict) else {}
+
+
 def _google_tool_choice_instruction(req):
     """Translate Google's ``toolConfig.functionCallingConfig`` into a constraint."""
-    config = (req.get("toolConfig") or {}).get("functionCallingConfig") or {}
+    config = _as_dict(_as_dict(req.get("toolConfig")).get("functionCallingConfig"))
     mode = config.get("mode", "AUTO")
     allowed = config.get("allowedFunctionNames") or []
 
@@ -299,7 +317,7 @@ def _google_tool_choice_instruction(req):
 
 def _google_tool_defs(req):
     """Extract functionDeclarations from a Google-native request."""
-    config = (req.get("toolConfig") or {}).get("functionCallingConfig") or {}
+    config = _as_dict(_as_dict(req.get("toolConfig")).get("functionCallingConfig"))
     if config.get("mode", "AUTO") == "NONE":
         return []
     defs = []

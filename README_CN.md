@@ -37,6 +37,12 @@
 - **Prometheus 指标** —— `GET /metrics` 以文本暴露格式导出计数器、状态码与延迟直方图，可直接接入既有监控
 - **多账号轮换** —— 通过 `cookie_files` 配置多个 Google 账号，被限流（`429`）的账号进入冷却，请求立即改由其他账号完成；单 cookie 部署行为完全不变
 - **Web 控制台** —— 打开 `http://localhost:8081/`，含对话 Playground、实时状态、请求活动、模型选择与可直接粘贴的客户端配置——单文件自包含页面（不加载任何外部资源），采用 Liquid Glass 设计体系：六级材质强度、桌面端悬浮导航栏（手机上变为底部导航栏）、明亮/深色/跟随系统三种主题、方向感视图切换、骨架屏加载、命令面板（`Ctrl`/`Cmd`+`K`）、键盘快捷键、带可见计时的玻璃质感轻提示与可访问的焦点顺序，并完整支持 `prefers-reduced-motion`、`prefers-reduced-transparency` 与 `prefers-contrast`
+- **背压控制** —— `max_concurrent_requests` 限制同时进行的生成数；超出的请求
+  立即返回 `503 server_busy` 并附 `Retry-After`，而不是在慢速上游后面堆积线程；
+  `/status` 与控制台会实时显示在途容量
+- **代理感知** —— 在反向代理之后，可启用 `trust_proxy_headers`，按
+  `X-Forwarded-For` 中的真实客户端地址进行限流与历史记录（默认关闭，因为没有
+  代理时该请求头可被伪造）
 - **生产级打包** —— 非 root Docker 镜像、健康检查、环境变量配置、优雅停机、CI
 - **Windows 一键启动** —— 双击 `start.bat` 即可创建虚拟环境、安装依赖、生成安全的 `config.json` 并启动服务
 - **零必需依赖** —— Python 3.8+，`httpx` 为可选
@@ -48,7 +54,7 @@
 **macOS / Linux**
 
 ```bash
-pip install httpx          # 可选，但流式输出需要它
+pip install httpx          # 可选；标准库传输层同样支持流式
 python -m gemini_web2api
 ```
 
@@ -159,7 +165,7 @@ gemini
 
 ### Codex CLI
 
-使用 Responses API (`/v1/responses`)，含完整流式事件序列。
+使用 Responses API (`/v1/responses`)，含完整流式事件序列——纯文本回复逐 token 实时流式输出（工具与 JSON 回复需要完整内容，因此仍会缓冲）。
 
 ## 可用模型
 
@@ -378,14 +384,14 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api tests
 ```
 
-717 个测试，全部离线运行——Gemini 协议在帧级别被模拟。CI 覆盖 Python 3.8–3.13、无第三方依赖的纯标准库运行、构建并安装 wheel 的校验、lint 与 Docker 构建。
+756 个测试，全部离线运行——Gemini 协议在帧级别被模拟。CI 覆盖 Python 3.8–3.13、无第三方依赖的纯标准库运行、构建并安装 wheel 的校验、lint 与 Docker 构建。
 
 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**
 
 ## 系统要求
 
 - Python 3.8+
-- `httpx` —— 可选但强烈建议；缺失时 `stream: true` 只返回一个缓冲块
+- `httpx` —— 可选；缺失时由标准库传输层提供连接池与增量流式读取
 - 能访问 `gemini.google.com`（部分地区需代理）
 
 ## Cloudflare Workers

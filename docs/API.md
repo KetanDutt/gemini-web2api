@@ -51,7 +51,7 @@ A trailing slash is accepted.
 |---|---|
 | `model` | Optional; defaults to `default_model`. Unknown names fall back to the default unless `strict_models` is set. |
 | `messages` | `system`, `developer`, `user`, `assistant`, `tool`. Content may be a string or a part list. Must be an array — any other type is a 400 `invalid_messages`. |
-| `stream` | Requires `httpx` for incremental delivery. |
+| `stream` | Incremental on both transports; `httpx` is not required. |
 | `stream_options.include_usage` | Emits a final chunk with `choices: []` and `usage`. `stream_options` must be an object — any other type is a 400 `invalid_stream_options`. |
 | `tools` | OpenAI function declarations. See [Tool calling](#tool-calling). |
 | `tool_choice` | `"none"`, `"auto"`, `"required"`, or `{"type":"function","function":{"name":…}}`. |
@@ -220,6 +220,14 @@ Each event is written as both an SSE `event:` line and a `data:` line, and
 carries a `sequence_number` starting at 1 and increasing by one. Codex CLI
 depends on all three; the ordering is asserted in the test suite.
 
+Plain text replies stream as they are generated: each
+`response.output_text.delta` is sent when the upstream produces it, so
+time-to-first-token matches the chat endpoint. Requests carrying `tools` or
+a JSON `text.format` are buffered instead — calls can only be recognised,
+and JSON only validated, once the reply is complete — and then emitted as
+the same event sequence in one go. A mid-stream upstream failure closes a
+live stream with `response.failed` rather than `response.completed`.
+
 ---
 
 ## Google-native endpoints (Gemini CLI)
@@ -315,7 +323,9 @@ Kubernetes readiness probe.
 
 ### GET /status
 
-Adds `config` (secrets redacted), `metrics`, `rate_limit` and `history`.
+Adds `config` (secrets redacted), `metrics`, `rate_limit`, `history` and
+`concurrency` (`{in_flight, max}` — generations running now against the
+`max_concurrent_requests` limit; `max` is 0 when unlimited).
 Requires an API key when keys are configured.
 
 ```json
@@ -324,8 +334,8 @@ Requires an API key when keys are configured.
     "uptime_sec": 3600.2,
       "counters": {"requests": 512, "completions": 480, "streams": 32,
                    "errors_4xx": 3, "errors_5xx": 1, "upstream_failures": 1,
-                   "rate_limited": 0, "images_uploaded": 4, "tool_calls_parsed": 12,
-                   "json_mode_failures": 2},
+                   "rate_limited": 0, "server_busy": 0, "images_uploaded": 4,
+                   "tool_calls_parsed": 12, "json_mode_failures": 2},
     "status_codes": {"200": 508, "401": 3, "502": 1},
     "latency_ms_avg": 1840.5, "latency_ms_samples": 512,
     "latency_histogram_ms": {"50": 0, "100": 0, "…": 0, "inf": 3},
@@ -472,6 +482,7 @@ Errors follow OpenAI's shape, so client SDKs surface them properly:
 | 400 | `invalid_model` | Bad `@think=` value, or unknown model with `strict_models` on |
 | 400 | `invalid_messages` | `messages` is not an array of message objects |
 | 400 | `invalid_stream_options` | `stream_options` is not an object |
+| 400 | `invalid_tools` / `invalid_tool_choice` | `tools` is not an array, or `tool_choice` is neither a string nor an object |
 | 400 | `empty_prompt` / `empty_input` / `empty_content` | No content after conversion |
 | 400 | `image_rejected` | Image URL refused (SSRF policy) or unfetchable |
 | 401 | `invalid_api_key` | Missing or wrong key. Response includes `WWW-Authenticate`. |
@@ -481,6 +492,7 @@ Errors follow OpenAI's shape, so client SDKs surface them properly:
 | 429 | `rate_limit_exceeded` | Your rate limit; `Retry-After` is set |
 | 429 | `upstream_rate_limited` | Google is throttling; `Retry-After` is the credential cooldown |
 | 501 | `unsupported_endpoint` | `/v1/embeddings`, `/v1/audio/speech`, `/v1/images/generations` |
+| 503 | `server_busy` | `max_concurrent_requests` reached; `Retry-After: 5` is set |
 | 502 | `stale_build_tag` | HTTP 405 upstream — the `bl` build tag is out of date |
 | 502 | `image_upload_failed` | Google rejected the image upload |
 | 502 | — | Any other upstream failure |

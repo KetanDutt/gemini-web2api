@@ -214,17 +214,24 @@ if that applies to you.
 
 Honest assessment of what remains possible:
 
-* **Thread exhaustion.** One thread per connection, unbounded. A slow-loris
-  client can consume them. Mitigate at the proxy with connection and
-  read timeouts.
+* **Thread exhaustion.** One thread per connection. A slow-loris client can
+  still consume connection threads at the proxy layer, so keep proxy
+  connection/read timeouts in place — but generations themselves are now
+  boundable: `max_concurrent_requests` caps how many upstream calls run at
+  once and refuses the rest with `503`, so a burst cannot turn into an
+  unbounded pile of threads waiting on Google.
 * **Upstream amplification.** Each client request costs at least one Google
   round trip, and thinking models take tens of seconds. Rate limiting is the
   main defence; keep it on when exposed.
 * **Memory.** Bodies are read fully into memory, bounded by
   `max_request_bytes`. 25 MiB × many concurrent requests adds up; lower it if
   you do not send large payloads.
-* **No request queueing.** There is no backpressure between the HTTP layer and
-  the upstream.
+* **Deliberately no request queueing.** There is still no queue between the
+  HTTP layer and the upstream, and that is a choice rather than an omission:
+  a queue would hide overload as latency until it surfaced as timeouts.
+  `max_concurrent_requests` provides the backpressure instead — excess work
+  is refused immediately and visibly, with `Retry-After`, and counted in
+  `server_busy` so the refusal itself is observable.
 
 ---
 

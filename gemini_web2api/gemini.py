@@ -18,6 +18,7 @@ import json
 import os
 import re
 import ssl
+import sys
 import threading
 import time
 import urllib.error
@@ -79,11 +80,13 @@ def set_log_level(level):
 
 def log(msg, level="info"):
     """Write a timestamped line to stderr when logging is enabled."""
-    if not CONFIG.get("log_requests", True):
-        return
+    # Severity first: this runs for every suppressed debug line (including
+    # BaseHTTPRequestHandler's per-request access log), so the common
+    # "not printed" path should not touch CONFIG or the clock at all.
     if LOG_LEVELS.get(level, 20) < _log_level[0]:
         return
-    import sys
+    if not CONFIG.get("log_requests", True):
+        return
     sys.stderr.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
     sys.stderr.flush()
 
@@ -131,6 +134,15 @@ def _get_httpx_client():
             _httpx_client = httpx.Client(
                 transport=transport,
                 timeout=httpx.Timeout(connect=connect, read=read, write=read, pool=connect),
+                # httpx's defaults keep at most 20 connections alive and expire
+                # them after only 5 idle seconds. Chat traffic is bursty with
+                # minutes of think-time between calls, so the default expiry
+                # meant nearly every real request paid a fresh DNS+TCP+TLS
+                # handshake. 120 s matches human pacing (and the stdlib pool's
+                # 90 s idle window, plus margin); the connection cap stays at
+                # httpx's 100, which is far above this server's concurrency.
+                limits=httpx.Limits(max_connections=100, max_keepalive_connections=32,
+                                    keepalive_expiry=120.0),
                 verify=True,
                 # We set Origin/Referer/User-Agent explicitly per request.
                 trust_env=not proxy,
@@ -498,14 +510,74 @@ def _apply_chat_persistence_flags(inner):
         inner[41] = [2]
 
 
+# Bytes that `urllib.parse.quote_plus` never escapes (RFC 3986 unreserved).
+_FORM_SAFE_BYTES = frozenset(
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-~")
+_FORM_ESCAPES = {
+    value: f"%{value:02X}".encode("ascii")
+    for value in range(256)
+    if value not in _FORM_SAFE_BYTES and value != 0x20
+}
+
+
+def _quote_form_value(text):
+    """Percent-encode one form value, byte-identically to ``quote_plus``.
+
+    ``urllib.parse.urlencode`` walks the value byte by byte in Python. That is
+    the single hottest function in payload construction for a long prompt
+    (~80% of `_build_payload` under a profiler at 30k chars), and it holds the
+    GIL the whole time, so under concurrency it taxes every other request too.
+    This finds the distinct bytes present and rewrites each one with
+    ``bytes.replace``, which scans in C: typically a handful of distinct
+    escapes for a whole payload. ``%`` is rewritten first so escapes inserted
+    afterwards are not themselves re-escaped, and space (``+``) last so the
+    plus signs it inserts are not escaped either. The output is exactly what
+    ``urlencode`` produced, so the upstream sees identical bytes.
+    """
+    data = str(text).encode("utf-8")
+    if not data:
+        return ""
+    present = set(data)
+    escape = [value for value in present if value in _FORM_ESCAPES]
+    if not escape and 0x20 not in present:
+        return data.decode("ascii")
+    escape.sort(key=lambda value: value != 0x25)
+    for value in escape:
+        data = data.replace(bytes((value,)), _FORM_ESCAPES[value])
+    if 0x20 in present:
+        data = data.replace(b" ", b"+")
+    return data.decode("ascii")
+
+
+def _retry_delay(attempt):
+    """Seconds to sleep before retry ``attempt`` (0-based).
+
+    Exponential backoff capped at ``retry_delay_sec``: 0.25 s, 0.5 s, 1 s, …
+    The old fixed delay charged the full ``retry_delay_sec`` (2 s by default)
+    before the *first* retry, which is exactly the transient case — a momentary
+    500 or a busy upstream that clears at once — where a quick retry recovers
+    the request. The cap keeps the configured value meaningful as the most a
+    client will ever wait between attempts, so a genuinely stuck upstream is
+    not hammered either. A configured delay below the first step is honoured
+    as-is, so tests and operators asking for tiny delays get them.
+    """
+    configured = float(CONFIG.get("retry_delay_sec", 2) or 0)
+    if configured <= 0:
+        return 0.0
+    return min(configured, 0.25 * (2 ** attempt))
+
+
 def _build_payload(prompt, model_id, think_mode, file_refs=None, extra_fields=None,
                    credential=None):
     from .models import PAYLOAD_SLOTS
 
     # See _build_headers: the auth file can supply the XSRF token, and it is
     # only read as a side effect of loading the cookie. Cached, so this is one
-    # stat() on a warm process.
-    load_cookie()
+    # stat() on a warm process. With a credential in hand the pool has already
+    # been built (that is where the credential came from), so the load — and
+    # its stat() of every configured cookie file — is skipped.
+    if credential is None:
+        load_cookie()
     inner = [None] * PAYLOAD_SLOTS
     if file_refs:
         refs = [[None, None, ref] for ref in file_refs]
@@ -534,14 +606,14 @@ def _build_payload(prompt, model_id, think_mode, file_refs=None, extra_fields=No
             if 0 <= index < len(inner):
                 inner[index] = value
     outer = [None, json.dumps(inner)]
-    params = {"f.req": json.dumps(outer)}
+    body = "f.req=" + _quote_form_value(json.dumps(outer))
     # The `at` token belongs to the account, so a pool sends the credential's
     # own when the exported auth file carried one and falls back to the global
     # value otherwise (which is all a single-cookie deployment has).
     xsrf = getattr(credential, "xsrf_token", None) or CONFIG.get("xsrf_token")
     if xsrf:
-        params["at"] = xsrf
-    return urllib.parse.urlencode(params)
+        body += "&at=" + _quote_form_value(xsrf)
+    return body
 
 
 def _get_url(reqid=None, credential=None):
@@ -560,29 +632,54 @@ def _get_url(reqid=None, credential=None):
 _BL_PATTERN = re.compile(r"(boq_assistant-bard-web-server_\d+\.\d+_p\d+)")
 
 
+def _find_bl(chunks):
+    """Return the build tag from an iterable of text chunks, or ``None``.
+
+    Stops consuming the iterable the moment the tag is seen. The page itself
+    is a megabyte-class document, and the old code downloaded and decoded all
+    of it on every refresh,
+    including on the 405 retry path where that download is pure added latency
+    in front of a request that has already failed once. Only a short tail of
+    the previous chunk is retained, which is enough for a tag split across a
+    chunk boundary and keeps the search linear instead of re-scanning the
+    whole page-so-far for every chunk.
+    """
+    tail = ""
+    for chunk in chunks:
+        if not chunk:
+            continue
+        window = tail + chunk
+        match = _BL_PATTERN.search(window)
+        if match:
+            return match.group(1)
+        tail = window[-128:]
+    return None
+
+
 def fetch_latest_bl(timeout=8):
     """Scrape the current ``bl`` build tag from the Gemini page.
 
     Returns ``None`` when it cannot be determined; callers must treat that as
     "keep the configured value", never as a fatal error.
     """
+    url = f"{GEMINI_ORIGIN}{_account_prefix()}/app"
+    headers = {"User-Agent": USER_AGENT, **_cookie_headers()}
     try:
         client = _get_httpx_client()
         if client is not None:
-            resp = client.get(
-                f"{GEMINI_ORIGIN}{_account_prefix()}/app",
-                headers={"User-Agent": USER_AGENT, **_cookie_headers()},
-                timeout=timeout,
-            )
-            html = resp.text
-        else:
-            req = urllib.request.Request(
-                f"{GEMINI_ORIGIN}{_account_prefix()}/app",
-                headers={"User-Agent": USER_AGENT, **_cookie_headers()},
-            )
-            html = _urlopen(req, timeout=timeout).read().decode("utf-8", errors="replace")
-        match = _BL_PATTERN.search(html)
-        return match.group(1) if match else None
+            stream = getattr(client, "stream", None)
+            if callable(stream):
+                with stream("GET", url, headers=headers, timeout=timeout) as resp:
+                    return _find_bl(resp.iter_text())
+            resp = client.get(url, headers=headers, timeout=timeout)
+            match = _BL_PATTERN.search(resp.text)
+            return match.group(1) if match else None
+        req = urllib.request.Request(url, headers=headers)
+        with _urlopen(req, timeout=timeout) as resp:
+            read = getattr(resp, "read1", None) or resp.read
+            return _find_bl(
+                chunk.decode("utf-8", errors="replace")
+                for chunk in iter(lambda: read(65536), b""))
     except Exception as exc:
         log(f"bl auto-update fetch failed: {exc}", "debug")
         return None
@@ -661,8 +758,13 @@ def clean_text(text, strip=True):
     """Remove internal code-execution artifacts from model output."""
     if not text:
         return ""
-    for pattern in _ARTIFACT_PATTERNS:
-        text = pattern.sub("", text)
+    # Fast path: both artifact shapes carry a marker substring, and nearly
+    # every call — in particular every streaming delta — contains neither.
+    # The DOTALL fence pattern is the expensive one to run over clean text,
+    # so only pay for the regexes when a marker says they could match.
+    if "code_" in text or "googleusercontent" in text:
+        for pattern in _ARTIFACT_PATTERNS:
+            text = pattern.sub("", text)
     return text.strip() if strip else text
 
 
@@ -716,16 +818,24 @@ def extract_response_text(raw):
             code=int(match.group(1)),
         )
 
-    result = ""
-    longest = ""
-    for line in raw.split("\n"):
-        for text in _extract_texts_from_line(line):
+    # The answer is the last non-empty segment in the body, so scan backwards
+    # and stop at the first one found. The old loop parsed every frame — each
+    # one a full cumulative copy of the answer, JSON-decoded twice — only to
+    # keep the final value and throw the rest away. On a 60-frame, 12k-char
+    # reply that is ~750 KB of JSON parsing to recover 12 KB of text; scanning
+    # from the end parses one frame in the common case, and `rfind` walks the
+    # line boundaries without materialising every line first. (The "longest segment"
+    # fallback the old loop maintained could only ever be returned when no
+    # segment had non-whitespace content, in which case it cleans to "" —
+    # so dropping it changes nothing observable.)
+    end = len(raw)
+    while end > 0:
+        start = raw.rfind("\n", 0, end) + 1
+        for text in reversed(_extract_texts_from_line(raw[start:end])):
             if text.strip():
-                result = text
-            if len(text) > len(longest):
-                longest = text
-    # Fall back to the longest segment if no frame carried usable text.
-    return clean_text(result or longest)
+                return clean_text(text)
+        end = start - 1
+    return ""
 
 
 # ─── Transports ──────────────────────────────────────────────────────────────
@@ -1074,6 +1184,24 @@ def preconnect():
     Returns True when a connection is ready for reuse.
     """
     try:
+        client = _get_httpx_client()
+        if client is not None:
+            # The stdlib pool below is invisible to httpx: warming it (as this
+            # function used to do unconditionally) left a socket idle in a pool
+            # no httpx request could ever draw from, while the first real
+            # request still paid the full handshake. A HEAD warms the httpx
+            # pool itself — same host, so the pooled connection is the one the
+            # first StreamGenerate call reuses — and carries no body either
+            # way. The status is irrelevant; only the handshake matters.
+            connect_timeout, _read_timeout = _timeouts()
+            client.head(
+                f"{GEMINI_ORIGIN}{_account_prefix()}/app",
+                headers={"User-Agent": USER_AGENT},
+                timeout=httpx.Timeout(connect=connect_timeout, read=connect_timeout,
+                                      write=connect_timeout, pool=connect_timeout),
+            )
+            log("Upstream connection pre-established (httpx)", "debug")
+            return True
         target = _connection_target(_get_url())
         _connect_timeout, read_timeout = _timeouts()
         key, connection = _connect(target)
@@ -1193,7 +1321,6 @@ def _rotate(credential, status, message):
 def generate(prompt, model_id, think_mode, file_refs=None, extra_fields=None):
     """Non-streaming generation with retry. Returns the final text."""
     attempts = max(1, int(CONFIG.get("retry_attempts", 3)))
-    delay = CONFIG.get("retry_delay_sec", 2)
     last_err = None
     credential = _next_credential()
 
@@ -1259,7 +1386,7 @@ def generate(prompt, model_id, think_mode, file_refs=None, extra_fields=None):
             last_err = exc
         if attempt < attempts - 1:
             log(f"Retry {attempt + 1}/{attempts}: {last_err}", "warning")
-            time.sleep(delay)
+            time.sleep(_retry_delay(attempt))
 
     if last_err is None:  # pragma: no cover - defensive
         last_err = RuntimeError("generation failed")
@@ -1268,22 +1395,35 @@ def generate(prompt, model_id, think_mode, file_refs=None, extra_fields=None):
 
 def _iter_stream_frames(resp):
     """Yield text segments from a streaming response, frame by frame."""
-    buf = ""
+    # Chunks are accumulated in a list and only joined when one of them
+    # actually contains a newline. The old `buf += chunk` / split-per-line
+    # loop re-copied the growing remainder for every network chunk and every
+    # line, and re-scanned all of it for the error marker each time; here the
+    # error scan is a C regex over just the new chunk (plus a short tail so a
+    # marker split across chunks is still caught), and each byte is joined
+    # and split once.
+    parts = []
+    error_window = ""
     for chunk in resp.iter_text():
-        buf += chunk
-        if "BardErrorInfo" in buf:
-            match = _BARD_ERROR.search(buf)
-            if match:
-                raise GeminiUpstreamError(
-                    f"Gemini upstream rejected request: BardErrorInfo [{match.group(1)}]",
-                    code=int(match.group(1)),
-                )
-        while "\n" in buf:
-            line, buf = buf.split("\n", 1)
-            for text in _extract_texts_from_line(line):
-                yield text
-    for text in _extract_texts_from_line(buf):
-        yield text
+        if not chunk:
+            continue
+        window = error_window + chunk
+        match = _BARD_ERROR.search(window)
+        if match:
+            raise GeminiUpstreamError(
+                f"Gemini upstream rejected request: BardErrorInfo [{match.group(1)}]",
+                code=int(match.group(1)),
+            )
+        error_window = window[-64:]
+        parts.append(chunk)
+        if "\n" not in chunk:
+            continue
+        lines = "".join(parts).split("\n")
+        parts = [lines[-1]] if lines[-1] else []
+        for line in lines[:-1]:
+            yield from _extract_texts_from_line(line)
+    if parts:
+        yield from _extract_texts_from_line("".join(parts))
 
 
 def generate_stream(prompt, model_id, think_mode, file_refs=None, extra_fields=None):
@@ -1300,10 +1440,8 @@ def generate_stream(prompt, model_id, think_mode, file_refs=None, extra_fields=N
     """
     client = _get_httpx_client()
     attempts = max(1, int(CONFIG.get("retry_attempts", 3)))
-    delay = CONFIG.get("retry_delay_sec", 2)
 
     emitted = ""       # text already handed to the caller
-    seen_longest = ""  # longest cumulative frame observed
     last_err = None
     credential = _next_credential()
 
@@ -1349,8 +1487,6 @@ def generate_stream(prompt, model_id, think_mode, file_refs=None, extra_fields=N
                         # instead of aborting the stream.
                         emitted = text
                         delta = clean_text(text, strip=False)
-                    if len(text) > len(seen_longest):
-                        seen_longest = text
                     if delta:
                         yield delta
                 return
@@ -1384,7 +1520,7 @@ def generate_stream(prompt, model_id, think_mode, file_refs=None, extra_fields=N
                 continue
             if attempt < attempts - 1:
                 log(f"Stream retry {attempt + 1}/{attempts}: {last_err}", "warning")
-                time.sleep(delay)
+                time.sleep(_retry_delay(attempt))
 
     if last_err is None:  # pragma: no cover - defensive
         last_err = RuntimeError("streaming generation failed")

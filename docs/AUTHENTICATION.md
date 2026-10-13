@@ -83,9 +83,13 @@ Exceeding the limit returns 429 with `Retry-After`:
            "type": "rate_limit_error", "code": "rate_limit_exceeded"}}
 ```
 
-Counters are per-process and in memory. Behind a reverse proxy, the client IP is
-the proxy's unless you set `X-Forwarded-For` handling at the proxy — prefer
-key-based limiting in that setup.
+Counters are per-process and in memory. Behind a reverse proxy, the client IP
+is the proxy's, so every client shares one bucket. Set
+`trust_proxy_headers: true` in that setup to key limits (and request history)
+on the first `X-Forwarded-For` address instead — but only then: the header is
+client-supplied, and trusting it without a proxy in front lets anyone mint a
+fresh bucket per request by lying about their address. Key-based limiting
+remains the more robust option where clients can be given keys.
 
 ---
 

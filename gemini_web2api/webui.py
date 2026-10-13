@@ -11,16 +11,16 @@ Three things live here:
 Everything is inlined: no CDN, no build step, no external requests. The page
 works offline and inside an air-gapped container, which is a tested property.
 
-The visual system is a Liquid Glass-inspired material language defined once
-in the ``:root`` design tokens. Six glass strengths are built from one recipe —
-a translucent fill, a backdrop blur with a little extra saturation, a hairline,
-a masked 1 px edge light and a shadow from the ramp — and elevation is what
-chooses the strength: the workspace pane is the quietest layer, panels and
-cards sit on it, the floating topbar and navigation rail sit above those,
-popovers above that, then dialogs, then toasts. A glass topbar holds identity
-and live health, a navigation rail floats beside the workspace with a glider
-that travels to the active item, and under 980 px that same rail becomes a
-thumb-reachable bottom bar. Light and dark are first-class schemes,
+The visual system is an original Liquid Glass-inspired material language
+defined once in the ``:root`` design tokens. Six reusable material strengths
+share one recipe — a translucent fill, restrained backdrop blur and saturation,
+a hairline, a masked 1 px edge light and a shadow from the ramp — but glass is
+spent only where depth explains hierarchy: floating chrome, menus, dialogs,
+toasts and the composer. In-flow panels, tables, metrics and lists use quieter
+near-solid surfaces over a nearly invisible ambient field, so content stays
+legible and scrolling does not pay for layers of blur. A floating navigation
+rail uses a glider that travels to the active item, and under 980 px that same
+rail becomes a thumb-reachable bottom bar. Light and dark are first-class schemes,
 ``prefers-reduced-motion``, ``prefers-reduced-transparency`` and
 ``prefers-contrast`` are all honoured, and the page still falls back to opaque
 materials where ``backdrop-filter`` is unavailable.
@@ -52,11 +52,11 @@ _DASHBOARD_HTML = r"""<!doctype html>
 <meta name="description" content="gemini-web2api console — chat, accounts and request activity for the Gemini Web → OpenAI-compatible API gateway.">
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#eef0f5" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0d0f15" media="(prefers-color-scheme: dark)">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%234285f4'/%3E%3Cstop offset='.5' stop-color='%239b72cb'/%3E%3Cstop offset='1' stop-color='%23d96570'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath fill='url(%23g)' d='M16 2C17 10.2 21.8 15 30 16C21.8 17 17 21.8 16 30C15 21.8 10.2 17 2 16C10.2 15 15 10.2 16 2Z'/%3E%3C/svg%3E">
+<meta name="theme-color" content="#0a0c11" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%234a63e7'/%3E%3Cstop offset='1' stop-color='%237f92ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath fill='url(%23g)' d='M16 2C17 10.2 21.8 15 30 16C21.8 17 17 21.8 16 30C15 21.8 10.2 17 2 16C10.2 15 15 10.2 16 2Z'/%3E%3C/svg%3E">
 <style>
 /* ═══════════════════════════════════════════════════════════════════════════
-   gemini-web2api console — Liquid Glass design system (v2)
+   gemini-web2api console — Liquid Glass design system (v3)
 
    1  Tokens      colour, material, light, depth, space, type, motion, layers
    2  Base        reset, canvas, typography, focus, scrollbars
@@ -69,7 +69,8 @@ _DASHBOARD_HTML = r"""<!doctype html>
    9  Overlays    veils, dialogs, palette, toasts
    10 States      skeletons, utilities
    11 Responsive  intentional layouts per breakpoint
-   12 Prefs       reduced motion, reduced transparency, contrast, print
+   12 Refinement  spatial hierarchy: quiet workspace, glass only floats
+   13 Prefs       reduced motion, reduced transparency, contrast, print
 
    Layer order (z-index): canvas -1 · workspace pane 1 · panels 2 ·
    chrome (topbar, rail, bottom bar) 30 · popovers 40 · dialogs 60 · toasts 70.
@@ -81,9 +82,9 @@ _DASHBOARD_HTML = r"""<!doctype html>
   color-scheme:light;
 
   /* Ink. Text is never translucent; only surfaces are. */
-  --bg:#eef0f5;
-  --bg-top:#f5f6fa;
-  --bg-bottom:#e2e5ee;
+  --bg:#f3f4f7;
+  --bg-top:#fafbfc;
+  --bg-bottom:#eceef3;
   --fg:#16181f;
   --fg-2:#5d626d;
   --fg-3:#5f6470;
@@ -100,20 +101,20 @@ _DASHBOARD_HTML = r"""<!doctype html>
   --info:#1d6896;
 
   /* Materials — one system, six strengths. Elevation picks the strength. */
-  --glass-1:rgba(255,255,255,.38);   /* inset tiles, cards, list surfaces   */
-  --glass-2:rgba(255,255,255,.55);   /* panels, transcript, tables          */
-  --glass-3:rgba(255,255,255,.66);   /* chrome: topbar, rail, sticky heads  */
-  --glass-4:rgba(255,255,255,.80);   /* popovers, menus, tooltips           */
-  --glass-5:rgba(255,255,255,.87);   /* dialogs and sheets                  */
-  --glass-6:rgba(255,255,255,.92);   /* toasts, highest layer               */
-  --pane:rgba(255,255,255,.28);      /* the workspace the panels sit on     */
-  --pane-stuck:rgba(255,255,255,.46);
+  --glass-1:rgba(255,255,255,.58);   /* inset tiles, cards, list surfaces   */
+  --glass-2:rgba(255,255,255,.72);   /* panels, transcript, tables          */
+  --glass-3:rgba(255,255,255,.78);   /* chrome: topbar, rail, sticky heads  */
+  --glass-4:rgba(255,255,255,.88);   /* popovers, menus, tooltips           */
+  --glass-5:rgba(255,255,255,.94);   /* dialogs and sheets                  */
+  --glass-6:rgba(255,255,255,.97);   /* toasts, highest layer               */
+  --pane:rgba(255,255,255,0);        /* workspace floats on the ambient bg  */
+  --pane-stuck:rgba(255,255,255,.72);
   --fill-1:rgba(22,24,31,.045);      /* quiet fills: hover, rails, meters   */
   --fill-2:rgba(22,24,31,.080);
   --fill-3:rgba(22,24,31,.130);
-  --field:rgba(255,255,255,.46);     /* input wells                         */
-  --field-hover:rgba(255,255,255,.62);
-  --field-focus:rgba(255,255,255,.90);
+  --field:rgba(255,255,255,.68);     /* input wells                         */
+  --field-hover:rgba(255,255,255,.82);
+  --field-focus:rgba(255,255,255,.96);
   --code-bg:rgba(22,24,31,.050);
   --scrim:rgba(20,22,30,.28);
   --surface-solid:247,248,251;      /* rgb triplet: opaque fallback surface  */
@@ -138,9 +139,9 @@ _DASHBOARD_HTML = r"""<!doctype html>
   --neu-bg:rgba(67,76,96,.09);    --neu-line:rgba(67,76,96,.20);
 
   /* Ambient colour behind the glass: three soft fields on the canvas. */
-  --tint-a:rgba(120,140,220,.15);
-  --tint-b:rgba(190,160,230,.11);
-  --tint-c:rgba(140,200,230,.11);
+  --tint-a:rgba(91,108,204,.075);
+  --tint-b:rgba(151,119,205,.055);
+  --tint-c:rgba(93,164,214,.050);
 
   /* Depth — ambient, never dramatic. */
   --sh-1:0 1px 1px rgba(20,24,40,.03), 0 2px 8px -2px rgba(20,24,40,.05);
@@ -159,10 +160,10 @@ _DASHBOARD_HTML = r"""<!doctype html>
   /* Blur and saturation */
   --blur-1:10px; --blur-2:16px; --blur-3:26px; --blur-4:36px; --blur-5:48px;
   --blur-veil:9px;
-  --sat-1:140%; --sat-2:160%; --sat-3:180%;
+  --sat-1:135%; --sat-2:150%; --sat-3:160%;
 
   /* Radii */
-  --r-1:8px; --r-2:12px; --r-3:16px; --r-4:22px; --r-5:28px; --r-6:34px;
+  --r-1:8px; --r-2:12px; --r-3:16px; --r-4:20px; --r-5:26px; --r-6:32px;
   --r-full:999px;
 
   /* Space */
@@ -171,7 +172,7 @@ _DASHBOARD_HTML = r"""<!doctype html>
 
   /* Type */
   --fs-micro:11px; --fs-meta:12.5px; --fs-sm:13.5px; --fs-body:15px;
-  --fs-lead:17px; --fs-h3:19px; --fs-h2:24px; --fs-h1:clamp(29px,2.9vw,38px);
+  --fs-lead:17px; --fs-h3:19px; --fs-h2:24px; --fs-h1:clamp(30px,2.9vw,40px);
   --track-tight:-.022em; --track-wide:.085em;
   --lh-tight:1.2; --lh-body:1.62;
 
@@ -199,9 +200,9 @@ _DASHBOARD_HTML = r"""<!doctype html>
    border contrast, surfaces that stay visible without turning white. */
 :root[data-theme="dark"]{
   color-scheme:dark;
-  --bg:#0d0f15;
-  --bg-top:#12141c;
-  --bg-bottom:#0a0c11;
+  --bg:#0a0c11;
+  --bg-top:#10131a;
+  --bg-bottom:#07090d;
   --fg:#eef0f6; --fg-2:#9aa2b1; --fg-3:#8a92a3;
   --accent:#7f92ff; --accent-fill:#4a63e7; --accent-hover:#4f66ea; --accent-fg:#ffffff;
   --accent-soft:rgba(127,146,255,.14);
@@ -210,14 +211,14 @@ _DASHBOARD_HTML = r"""<!doctype html>
   --bad:#f0676d; --bad-fill:#f0676d;
   --info:#7fc8ef;
 
-  --glass-1:rgba(255,255,255,.045);
-  --glass-2:rgba(255,255,255,.065);
-  --glass-3:rgba(255,255,255,.085);
-  --glass-4:rgba(24,27,38,.72);
-  --glass-5:rgba(26,29,40,.86);
-  --glass-6:rgba(30,34,46,.92);
-  --pane:rgba(255,255,255,.030);
-  --pane-stuck:rgba(255,255,255,.055);
+  --glass-1:rgba(255,255,255,.055);
+  --glass-2:rgba(255,255,255,.085);
+  --glass-3:rgba(255,255,255,.110);
+  --glass-4:rgba(22,25,34,.78);
+  --glass-5:rgba(24,27,37,.88);
+  --glass-6:rgba(28,32,43,.94);
+  --pane:rgba(255,255,255,0);
+  --pane-stuck:rgba(255,255,255,.065);
   --fill-1:rgba(255,255,255,.045);
   --fill-2:rgba(255,255,255,.070);
   --fill-3:rgba(255,255,255,.120);
@@ -242,9 +243,9 @@ _DASHBOARD_HTML = r"""<!doctype html>
   --warn-bg:rgba(226,178,90,.12); --warn-line:rgba(226,178,90,.30);
   --bad-bg:rgba(240,103,109,.10); --bad-line:rgba(240,103,109,.30);
   --neu-bg:rgba(238,240,246,.08);  --neu-line:rgba(238,240,246,.16);
-  --tint-a:rgba(90,110,220,.12);
-  --tint-b:rgba(150,110,220,.09);
-  --tint-c:rgba(80,170,230,.08);
+  --tint-a:rgba(90,110,220,.070);
+  --tint-b:rgba(150,110,220,.050);
+  --tint-c:rgba(80,170,230,.045);
 
   --sh-1:0 1px 1px rgba(0,0,0,.18), 0 2px 8px -2px rgba(0,0,0,.22);
   --sh-2:0 1px 1px rgba(0,0,0,.18), 0 12px 32px -16px rgba(0,0,0,.48);
@@ -261,9 +262,9 @@ _DASHBOARD_HTML = r"""<!doctype html>
 }
 @media (prefers-color-scheme:dark){
 :root:not([data-theme="light"]){  color-scheme:dark;
-  --bg:#0d0f15;
-  --bg-top:#12141c;
-  --bg-bottom:#0a0c11;
+  --bg:#0a0c11;
+  --bg-top:#10131a;
+  --bg-bottom:#07090d;
   --fg:#eef0f6; --fg-2:#9aa2b1; --fg-3:#8a92a3;
   --accent:#7f92ff; --accent-fill:#4a63e7; --accent-hover:#4f66ea; --accent-fg:#ffffff;
   --accent-soft:rgba(127,146,255,.14);
@@ -272,14 +273,14 @@ _DASHBOARD_HTML = r"""<!doctype html>
   --bad:#f0676d; --bad-fill:#f0676d;
   --info:#7fc8ef;
 
-  --glass-1:rgba(255,255,255,.045);
-  --glass-2:rgba(255,255,255,.065);
-  --glass-3:rgba(255,255,255,.085);
-  --glass-4:rgba(24,27,38,.72);
-  --glass-5:rgba(26,29,40,.86);
-  --glass-6:rgba(30,34,46,.92);
-  --pane:rgba(255,255,255,.030);
-  --pane-stuck:rgba(255,255,255,.055);
+  --glass-1:rgba(255,255,255,.055);
+  --glass-2:rgba(255,255,255,.085);
+  --glass-3:rgba(255,255,255,.110);
+  --glass-4:rgba(22,25,34,.78);
+  --glass-5:rgba(24,27,37,.88);
+  --glass-6:rgba(28,32,43,.94);
+  --pane:rgba(255,255,255,0);
+  --pane-stuck:rgba(255,255,255,.065);
   --fill-1:rgba(255,255,255,.045);
   --fill-2:rgba(255,255,255,.070);
   --fill-3:rgba(255,255,255,.120);
@@ -304,9 +305,9 @@ _DASHBOARD_HTML = r"""<!doctype html>
   --warn-bg:rgba(226,178,90,.12); --warn-line:rgba(226,178,90,.30);
   --bad-bg:rgba(240,103,109,.10); --bad-line:rgba(240,103,109,.30);
   --neu-bg:rgba(238,240,246,.08);  --neu-line:rgba(238,240,246,.16);
-  --tint-a:rgba(90,110,220,.12);
-  --tint-b:rgba(150,110,220,.09);
-  --tint-c:rgba(80,170,230,.08);
+  --tint-a:rgba(90,110,220,.070);
+  --tint-b:rgba(150,110,220,.050);
+  --tint-c:rgba(80,170,230,.045);
 
   --sh-1:0 1px 1px rgba(0,0,0,.18), 0 2px 8px -2px rgba(0,0,0,.22);
   --sh-2:0 1px 1px rgba(0,0,0,.18), 0 12px 32px -16px rgba(0,0,0,.48);
@@ -389,13 +390,13 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
 .canvas-glow{
   position:absolute;inset:-24% -12% -8%;display:block;
   background:
-    radial-gradient(38% 30% at 62% 22%, rgba(255,255,255,.40), transparent 70%),
-    radial-gradient(34% 26% at 22% 62%, rgba(120,140,220,.10), transparent 72%);
+    radial-gradient(38% 30% at 62% 22%, rgba(255,255,255,.22), transparent 70%),
+    radial-gradient(34% 26% at 22% 62%, rgba(120,140,220,.07), transparent 72%);
   transform:translate3d(0,0,0);
   will-change:transform;
 }
 .canvas::after{ /* fine grain keeps the soft fields from banding */
-  content:"";position:absolute;inset:0;opacity:.030;
+  content:"";position:absolute;inset:0;opacity:.020;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 :root[data-theme="dark"] .canvas-glow{
@@ -429,17 +430,15 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
   -webkit-mask-composite:xor;mask-composite:exclude;
   opacity:.9;
 }
+/* In-flow surfaces stay near-solid and never pay for backdrop blur while
+   content scrolls beneath them; blur is reserved for layers that float. */
 .glass-1{
   background:var(--glass-1);
-  -webkit-backdrop-filter:blur(var(--blur-1)) saturate(var(--sat-1));
-  backdrop-filter:blur(var(--blur-1)) saturate(var(--sat-1));
   box-shadow:var(--sh-1), var(--sh-inset);
 }
 .glass-2{
   background:var(--glass-2);
-  -webkit-backdrop-filter:blur(var(--blur-2)) saturate(var(--sat-2));
-  backdrop-filter:blur(var(--blur-2)) saturate(var(--sat-2));
-  box-shadow:var(--sh-2), var(--sh-inset);
+  box-shadow:var(--sh-1), var(--sh-inset);
 }
 .glass-3{
   background:var(--glass-3);
@@ -465,6 +464,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
   backdrop-filter:blur(var(--blur-3)) saturate(var(--sat-3));
   box-shadow:var(--sh-4), var(--sh-inset);
 }
+.glass-1::before,.glass-2::before{opacity:.45}
 /* Tinted glass — contextual states only, never behind body copy. */
 .tint-acc{background:var(--acc-bg);border-color:var(--acc-line)}
 .tint-ok{background:var(--ok-bg);border-color:var(--ok-line)}
@@ -480,7 +480,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
   position:relative;z-index:var(--z-pane);
   height:100%;display:flex;flex-direction:column;gap:clamp(10px,1.1vw,14px);
   padding:clamp(10px,1.2vw,16px) clamp(12px,1.8vw,22px) clamp(12px,1.5vw,18px);
-  max-width:1560px;margin:0 auto;
+  max-width:1500px;margin:0 auto;
 }
 
 /* Topbar — identity, live health and global actions. Compacts as the
@@ -489,13 +489,19 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
   position:relative;z-index:var(--z-chrome);flex:none;
   display:flex;align-items:center;gap:var(--sp-3);min-width:0;
   padding:8px 10px;border-radius:var(--r-4);
+  background:transparent;border-color:transparent;box-shadow:none;
+  -webkit-backdrop-filter:none;backdrop-filter:none;
   transition:padding var(--d-3) var(--e-out),background-color var(--d-3) var(--e-out),
              border-color var(--d-3) var(--e-out),box-shadow var(--d-3) var(--e-out);
 }
 .topbar.is-scrolled{
   padding:5px 8px;background:var(--glass-4);border-color:var(--line-2);
+  -webkit-backdrop-filter:blur(var(--blur-3)) saturate(var(--sat-2));
+  backdrop-filter:blur(var(--blur-3)) saturate(var(--sat-2));
   box-shadow:var(--sh-3), var(--sh-inset);
 }
+.topbar::before{opacity:0;transition:opacity var(--d-3) var(--e-out)}
+.topbar.is-scrolled::before{opacity:.9}
 .brand{
   display:flex;align-items:center;gap:11px;min-width:0;
   appearance:none;background:none;border:0;padding:4px;margin:-4px;
@@ -505,7 +511,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
 .mark{
   width:36px;height:36px;flex:0 0 36px;border-radius:var(--r-2);
   display:grid;place-items:center;position:relative;
-  background:var(--glass-4);border:1px solid var(--line-1);
+  background:var(--accent-soft);border:1px solid var(--acc-line);
   box-shadow:var(--sh-1), var(--sh-inset);
   transition:transform var(--d-2) var(--e-spring),box-shadow var(--d-2) var(--e-out);
 }
@@ -583,10 +589,11 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
   position:absolute;inset:0;z-index:var(--z-chrome);
   display:flex;flex-direction:column;gap:var(--sp-2);
   padding:10px;border-radius:var(--r-5);
+  background:var(--glass-2);box-shadow:var(--sh-1), var(--sh-inset);
   transition:background-color var(--d-3) var(--e-out),box-shadow var(--d-3) var(--e-out),
              border-color var(--d-3) var(--e-out);
 }
-.rail.is-scrolled{border-color:var(--line-2);box-shadow:var(--sh-3), var(--sh-inset)}
+.rail.is-scrolled{background:var(--glass-3);border-color:var(--line-2);box-shadow:var(--sh-3), var(--sh-inset)}
 .rail-group{
   padding:2px 10px 4px;font-size:var(--fs-micro);font-weight:640;color:var(--fg-3);
   text-transform:uppercase;letter-spacing:var(--track-wide);
@@ -597,8 +604,8 @@ nav.tabs{
 }
 nav.tabs .glider{
   position:absolute;left:0;top:0;width:0;height:0;border-radius:var(--r-3);
-  background:var(--glass-4);border:1px solid var(--line-2);
-  box-shadow:var(--sh-2), var(--sh-inset);
+  background:var(--accent-soft);border:1px solid var(--acc-line);
+  box-shadow:var(--sh-inset);
   opacity:0;pointer-events:none;
   transition:transform var(--d-3) var(--e-glide),width var(--d-3) var(--e-glide),
              height var(--d-3) var(--e-glide),opacity var(--d-2) var(--e-out);
@@ -659,14 +666,11 @@ main.content{
   overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
   scrollbar-gutter:stable;
   padding:clamp(16px,1.9vw,30px) clamp(14px,2.1vw,34px) var(--sp-8);
-  border-radius:var(--r-5);border:1px solid var(--line-1);
-  background:var(--pane);
-  -webkit-backdrop-filter:blur(var(--blur-1)) saturate(var(--sat-1));
-  backdrop-filter:blur(var(--blur-1)) saturate(var(--sat-1));
-  box-shadow:var(--sh-1), var(--sh-inset);
+  border-radius:0;border:1px solid transparent;
+  background:var(--pane);box-shadow:none;scroll-padding-top:12px;
   transition:background-color var(--d-3) var(--e-out);
 }
-main.content.is-scrolled{background:var(--pane-stuck)}
+main.content.is-scrolled{background:var(--pane)}
 main.content>section,main.content>footer.foot{max-width:var(--pane-max);margin-inline:auto}
 
 /* Pane transitions: the incoming view fades in from the direction of travel. */
@@ -707,9 +711,9 @@ section.tab.active[data-enter="none"]{animation:panelIn var(--d-3) var(--e-enter
 }
 @media (hover:hover){
   .btn:hover::before,.tab-btn:hover::before,.seg-btn:hover::before,.tile:hover::after,
-  .chip:hover::after,.pal-item:hover::after,button.copy:hover::after{opacity:.72}
+  .chip:hover::after,.pal-item:hover::after,button.copy:hover::after{opacity:.45}
   /* The primary button is already bright: it needs the least light. */
-  .btn--primary:hover::before{opacity:.34}
+  .btn--primary:hover::before{opacity:.22}
 }
 /* Primary — a top-lit accent object: the gradient is the light, the ring
    shadow is the depth, and hover moves the fill one step via --accent-hover
@@ -717,13 +721,13 @@ section.tab.active[data-enter="none"]{animation:panelIn var(--d-3) var(--e-enter
 .btn--primary{
   background:linear-gradient(180deg,color-mix(in srgb,var(--accent-fill) 86%,#fff) 0%,var(--accent-fill) 62%);
   color:var(--accent-fg);border-color:transparent;
-  box-shadow:var(--sh-lift-1), 0 8px 20px -6px var(--acc-ring),
+  box-shadow:var(--sh-lift-1), 0 6px 16px -8px var(--acc-ring),
              inset 0 1px 0 var(--edge-hi-strong);
 }
 .btn--primary:hover:not(:disabled){
   background:linear-gradient(180deg,color-mix(in srgb,var(--accent-hover) 86%,#fff) 0%,var(--accent-hover) 62%);
   transform:translateY(-1px);
-  box-shadow:var(--sh-lift-2), 0 14px 30px -8px var(--acc-ring),
+  box-shadow:var(--sh-lift-2), 0 10px 22px -10px var(--acc-ring),
              inset 0 1px 0 var(--edge-hi-strong)}
 .btn--primary:active:not(:disabled){transform:translateY(0) scale(.978);
   box-shadow:var(--sh-lift-1), 0 3px 10px -4px var(--acc-ring),
@@ -781,10 +785,10 @@ input:hover:not(:disabled),select:hover:not(:disabled),textarea:hover:not(:disab
   border-color:var(--line-2);background:var(--field-hover)}
 input:focus,select:focus,textarea:focus{
   outline:none;border-color:var(--accent);background:var(--field-focus);
-  box-shadow:0 0 0 3.5px var(--acc-ring),var(--sh-well);
+  box-shadow:0 0 0 3px var(--acc-ring),var(--sh-well);
 }
 input:disabled,select:disabled,textarea:disabled{opacity:.55;cursor:not-allowed}
-input[aria-invalid="true"]{border-color:var(--bad-fill);box-shadow:0 0 0 3.5px var(--bad-bg)}
+input[aria-invalid="true"]{border-color:var(--bad-fill);box-shadow:0 0 0 3px var(--bad-bg)}
 select{
   appearance:none;-webkit-appearance:none;cursor:pointer;padding-right:34px;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='7' viewBox='0 0 11 7'%3E%3Cpath d='M1.2 1.4 5.5 5.6l4.3-4.2' fill='none' stroke='%234b5462' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -924,7 +928,7 @@ select{
 .phead{display:flex;align-items:flex-end;gap:var(--sp-4);flex-wrap:wrap;padding:2px 2px 0}
 .phead-text{min-width:0;max-width:68ch}
 .phead h2{
-  font-size:var(--fs-h1);font-weight:640;letter-spacing:var(--track-tight);
+  font-size:var(--fs-h1);font-weight:650;letter-spacing:var(--track-tight);
   line-height:var(--lh-tight);
 }
 .phead p{color:var(--fg-2);font-size:var(--fs-sm);margin-top:8px;line-height:1.6}
@@ -937,11 +941,13 @@ select{
   text-transform:uppercase;letter-spacing:var(--track-wide);
   margin-top:var(--sp-3);
 }
-.slabel::after{content:"";flex:1;height:1px;background:var(--line-1)}
+.slabel::before{content:"";width:5px;height:5px;flex:0 0 5px;border-radius:var(--r-full);
+  background:var(--accent);opacity:.5}
+.slabel::after{content:"";flex:0 0 28px;height:1px;background:var(--line-2)}
 .slabel .count{font-weight:560;letter-spacing:.01em;text-transform:none;color:var(--fg-3);font-size:var(--fs-meta)}
 
 .panel{
-  border-radius:var(--r-4);padding:var(--sp-4);
+  border-radius:var(--r-4);padding:var(--sp-5);
   display:flex;flex-direction:column;gap:var(--sp-3);min-width:0;
 }
 .panel--flush{padding:0;overflow:hidden}
@@ -954,13 +960,27 @@ select{
 /* Tiles — the numerical face of the console. */
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(196px,1fr));gap:var(--sp-3)}
 .tile{
-  position:relative;border-radius:var(--r-3);padding:13px 15px;min-width:0;
+  position:relative;border-radius:var(--r-3);padding:14px 16px;min-width:0;
   display:flex;flex-direction:column;gap:3px;
   transition:transform var(--d-2) var(--e-out),box-shadow var(--d-2) var(--e-out),
              border-color var(--d-2) var(--e-out),background-color var(--d-2) var(--e-out);
   animation:riseIn var(--d-3) var(--e-enter) backwards;animation-delay:calc(var(--i,0) * 22ms);
 }
 @keyframes riseIn{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+/* Status metrics read as one instrument, not a pile of cards: hairline
+   dividers on a single surface. Model cards stay separate objects below. */
+.tiles:not(#models){
+  gap:1px;padding:1px;background:var(--line-1);
+  border:1px solid var(--line-1);border-radius:var(--r-4);overflow:hidden;
+}
+.tiles:not(#models) .tile{
+  border:0;border-radius:0;background:var(--glass-2);box-shadow:none;
+}
+.tiles:not(#models) .tile::before{display:none}
+.tiles:not(#models) .tile:hover{
+  transform:none;background:var(--glass-3);box-shadow:none;
+}
+.tiles:not(#models) .tile .v{font-size:19px}
 /* Hover is a whisper: a touch of lift, a touch of light. */
 .tile:hover{transform:translateY(-1.5px);border-color:var(--line-2);background:var(--glass-2);
   box-shadow:var(--sh-2), var(--sh-inset)}
@@ -1052,13 +1072,15 @@ tr.sk-row:hover td{background:transparent}
 /* A definite height (viewport-relative, clamped) lets the transcript scroll
    inside its panel while the composer stays put. */
 .chat{
-  display:grid;grid-template-columns:244px minmax(0,1fr);gap:var(--sp-4);
+  display:grid;grid-template-columns:244px minmax(0,1fr);gap:var(--sp-5);
   height:clamp(380px, calc(100dvh - 320px), 700px);min-height:0;
 }
 .crail{
   border-radius:var(--r-4);padding:var(--sp-3);display:flex;flex-direction:column;gap:var(--sp-2);
   min-height:0;min-width:0;
+  background:transparent;border-color:transparent;box-shadow:none;
 }
+.crail::before{opacity:0}
 .crail-head{display:flex;align-items:center;gap:var(--sp-2);padding:2px 4px 6px}
 .crail-head .lbl{flex:1}
 .crail-list{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:2px;
@@ -1074,7 +1096,7 @@ tr.sk-row:hover td{background:transparent}
 .conv .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:520}
 .conv .n{font-size:10.5px;color:var(--fg-3);font-family:var(--mono);
   font-variant-numeric:tabular-nums;flex:0 0 auto}
-.conv.sel{background:var(--glass-3);border-color:var(--line-2);box-shadow:var(--sh-1), var(--sh-inset)}
+.conv.sel{background:var(--accent-soft);border-color:var(--acc-line);box-shadow:none}
 .conv.sel .t{font-weight:600;color:var(--fg)}
 .conv.sel::before{ /* the selected row keeps a quiet accent mark, not a block */
   content:"";position:absolute;left:-5px;top:50%;width:3px;height:17px;margin-top:-8.5px;
@@ -1102,6 +1124,7 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
 .thread{
   border-radius:var(--r-4);overflow:hidden;display:flex;flex-direction:column;
   min-width:0;min-height:0;
+  border-color:var(--line-2);box-shadow:var(--sh-2), var(--sh-inset);
 }
 .thread-bar{
   display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;
@@ -1110,11 +1133,11 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
 }
 .thread-bar .spacer{flex:1}
 .thread-bar select{width:auto;min-width:132px;max-width:230px;padding:7px 30px 7px 11px;font-size:var(--fs-meta);
-  border-radius:var(--r-2)}
+  border-radius:var(--r-full)}
 .thread-bar .key-field{position:relative;display:flex;align-items:center}
 .thread-bar .key-field svg{position:absolute;left:10px;width:13px;height:13px;color:var(--fg-3)}
 .thread-bar input[type="password"]{width:205px;padding:7px 11px 7px 29px;font-size:var(--fs-meta);
-  border-radius:var(--r-2)}
+  border-radius:var(--r-full)}
 
 .thread-body{position:relative;flex:1;display:flex;flex-direction:column;min-height:0}
 .msgs{
@@ -1124,8 +1147,8 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
 .msg{display:grid;grid-template-columns:30px minmax(0,1fr);gap:13px;animation:msgIn var(--d-4) var(--e-enter)}
 @keyframes msgIn{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
 .msg-avatar{
-  width:30px;height:30px;border-radius:var(--r-1);display:grid;place-items:center;
-  background:var(--glass-3);border:1px solid var(--line-1);box-shadow:var(--sh-1), var(--sh-inset);
+  width:30px;height:30px;border-radius:var(--r-2);display:grid;place-items:center;
+  background:var(--accent-soft);border:1px solid var(--acc-line);box-shadow:none;
   color:var(--accent);margin-top:1px;
 }
 .msg-avatar svg{width:15px;height:15px}
@@ -1145,7 +1168,7 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
   background:linear-gradient(180deg,color-mix(in srgb,var(--accent-fill) 88%,#fff),var(--accent-fill));
   color:var(--accent-fg);
   border:1px solid color-mix(in srgb,var(--accent-fill) 86%,#000);
-  border-radius:var(--r-3);border-top-left-radius:var(--r-1);
+  border-radius:var(--r-3);border-bottom-left-radius:6px;
   padding:11px 15px;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.22), 0 8px 24px -12px var(--acc-ring);
   -webkit-backdrop-filter:blur(var(--blur-1)) saturate(var(--sat-1));
@@ -1208,14 +1231,16 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
   display:flex;flex-direction:column;gap:8px;
   background:linear-gradient(180deg, transparent, var(--fill-1))}
 .composer .well{
-  border-radius:var(--r-3);border:1px solid var(--line-1);background:var(--field);
+  border-radius:var(--r-4);border:1px solid var(--line-2);background:var(--glass-5);
+  -webkit-backdrop-filter:blur(var(--blur-2)) saturate(var(--sat-2));
+  backdrop-filter:blur(var(--blur-2)) saturate(var(--sat-2));
   padding:11px 12px 9px;display:flex;flex-direction:column;gap:8px;
-  box-shadow:var(--sh-well);
+  box-shadow:var(--sh-2), var(--sh-inset);
   transition:border-color var(--d-2) var(--e-out),box-shadow var(--d-2) var(--e-out),
              background-color var(--d-2) var(--e-out);
 }
 .composer .well:focus-within{border-color:var(--accent);background:var(--field-focus);
-  box-shadow:0 0 0 3.5px var(--acc-ring), var(--sh-well)}
+  box-shadow:0 0 0 3px var(--acc-ring), var(--sh-2)}
 .composer textarea{
   width:100%;min-height:26px;max-height:220px;resize:none;padding:0;border:0;background:none;
   font-size:var(--fs-body);line-height:1.6;box-shadow:none;
@@ -1236,7 +1261,7 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
   animation:panelIn var(--d-3) var(--e-enter);
 }
 .empty-icon{
-  width:54px;height:54px;border-radius:var(--r-4);display:grid;place-items:center;
+  width:54px;height:54px;border-radius:var(--r-full);display:grid;place-items:center;
   color:var(--accent);background:var(--glass-3);border:1px solid var(--line-1);
   box-shadow:var(--sh-2), var(--sh-inset);margin-bottom:var(--sp-3);
 }
@@ -1281,7 +1306,6 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
 }
 .bar .fill{
   width:100%;border-radius:7px 7px 3px 3px;
-  background:var(--accent);opacity:.72;
   background:linear-gradient(180deg, color-mix(in srgb,var(--accent-fill) 80%,transparent),
              color-mix(in srgb,var(--accent-fill) 38%,transparent));
   opacity:1;border:1px solid var(--acc-line);border-bottom:0;
@@ -1680,7 +1704,32 @@ main.content, .scroller, .crail-list, .pal-list, .msgs{scrollbar-color:var(--fil
   .thread{min-height:320px}
 }
 
-/* ── 12. Preferences ─────────────────────────────────────────────────────── */
+/* ── 12. Spatial refinement (v3) ─────────────────────────────────────────── */
+/* The workspace is borderless at every size; glass belongs to the chrome and
+   floating layers. These rules sit after §11 so the hierarchy survives the
+   breakpoint reshuffle, and before §13 so user preferences still win. */
+@media (max-width:980px){
+  .topbar{
+    background:var(--glass-4);border-color:var(--line-1);
+    -webkit-backdrop-filter:blur(var(--blur-3)) saturate(var(--sat-2));
+    backdrop-filter:blur(var(--blur-3)) saturate(var(--sat-2));
+    box-shadow:var(--sh-2), var(--sh-inset);
+  }
+  .topbar::before{opacity:.9}
+  main.content{border-radius:0;border-color:transparent;box-shadow:none}
+  .rail{background:var(--glass-5);box-shadow:var(--sh-4), var(--sh-inset)}
+  .thread{border-radius:var(--r-5)}
+}
+@media (max-width:760px){
+  .tiles:not(#models){border-radius:var(--r-3)}
+}
+@media (max-width:560px){
+  main.content{padding-left:14px;padding-right:14px}
+  .composer{padding-left:var(--sp-3);padding-right:var(--sp-3)}
+  .composer .well{border-radius:var(--r-3)}
+}
+
+/* ── 13. Preferences ─────────────────────────────────────────────────────── */
 /* Reduced motion: transitions collapse, but every state change stays visible
    (the glider still lands on the active item, counters still update). */
 @media (prefers-reduced-motion:reduce){
@@ -1755,14 +1804,7 @@ table.stack-rows td[data-label=""]::before{display:none}
     <a class="brand" href="#main" id="brandBtn">
       <span class="mark" aria-hidden="true">
         <svg viewBox="0 0 32 32" role="img">
-          <defs>
-            <linearGradient id="brandGrad" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stop-color="#4285f4"/>
-              <stop offset=".5" stop-color="#9b72cb"/>
-              <stop offset="1" stop-color="#d96570"/>
-            </linearGradient>
-          </defs>
-          <path fill="url(#brandGrad)" d="M16 2C17 10.2 21.8 15 30 16C21.8 17 17 21.8 16 30C15 21.8 10.2 17 2 16C10.2 15 15 10.2 16 2Z"/>
+          <path style="fill:var(--accent)" d="M16 2C17 10.2 21.8 15 30 16C21.8 17 17 21.8 16 30C15 21.8 10.2 17 2 16C10.2 15 15 10.2 16 2Z"/>
         </svg>
       </span>
       <span class="brand-text">
@@ -3158,9 +3200,14 @@ async function refreshStatus(force){
       tile(k.replace(/_/g, ' '), c[k], {num: true, i: i})).join('');
 
     const hist = m.latency_histogram_ms || {};
+    const cap = s.concurrency || {};
+    const capText = cap.max
+      ? (cap.in_flight ?? 0) + ' / ' + cap.max
+      : String(cap.in_flight ?? 0);
     $('latency').innerHTML = [
       ['Average', fmtMs(m.latency_ms_avg)],
       ['Samples', m.latency_ms_samples ?? 0],
+      ['In flight', capText],
       ['Uptime', fmtUptime(m.uptime_sec)],
     ].map(([k, v], i) => tile(k, v, {i: i, mono: k !== 'Uptime'})).join('');
     renderChart(hist, m.latency_ms_samples ?? 0);
@@ -3675,9 +3722,17 @@ setInterval(() => { if ($('autoAct').checked && $('tab-activity').classList.cont
 """
 
 
+# The page is a 180 KB constant with one small hole in it. Splitting and
+# encoding the two constant halves once, at import, means a render only
+# encodes the (tiny) state payload and joins three byte strings, instead of
+# scanning and re-encoding the whole document to insert a few hundred bytes.
+_DASHBOARD_HEAD, _DASHBOARD_TAIL = (
+    part.encode("utf-8") for part in _DASHBOARD_HTML.split(_STATE_TOKEN, 1))
+
+
 def render_dashboard(state):
     """Return the dashboard HTML with the live state injected."""
     payload = json.dumps(state, ensure_ascii=False, default=str)
     # Prevent an early </script> in any interpolated value from breaking out.
     payload = payload.replace("</", "<\\/").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
-    return _DASHBOARD_HTML.replace(_STATE_TOKEN, payload).encode("utf-8")
+    return b"".join((_DASHBOARD_HEAD, payload.encode("utf-8"), _DASHBOARD_TAIL))

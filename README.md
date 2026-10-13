@@ -58,12 +58,20 @@ Studio, ChatBox, NextChat, LobeChat, the OpenAI SDK, Codex CLI, Gemini CLI.
 - **Web console** — open `http://localhost:8081/` for a chat playground, live
   status, request activity, model picker and ready-to-paste client config —
   a self-contained page (no external assets) in a Liquid Glass design system:
-  six material strengths, a floating nav rail that becomes a bottom bar on
-  phones, light/dark/system themes, directional view transitions, skeleton
+  six material strengths with glass reserved for floating chrome, dialogs and
+  toasts over quiet content surfaces, a floating nav rail that becomes a
+  bottom bar on phones, light/dark/system themes, directional view transitions, skeleton
   loading, a command palette (`Ctrl`/`Cmd`+`K`), keyboard shortcuts, glass
   toasts with visible timers and an accessible focus order — all honouring
   `prefers-reduced-motion`, `prefers-reduced-transparency` and
   `prefers-contrast`
+- **Backpressure** — `max_concurrent_requests` caps simultaneous generations;
+  excess requests fail fast with `503 server_busy` and `Retry-After` instead
+  of piling up threads behind a slow upstream, and `/status` (plus the
+  console) reports live in-flight capacity
+- **Proxy-aware** — behind a reverse proxy, `trust_proxy_headers` keys rate
+  limits and history on the real client from `X-Forwarded-For` (off by
+  default, because the header is spoofable without a proxy in front)
 - **Production-ready packaging** — non-root Docker image, healthchecks,
   environment configuration, graceful shutdown, CI
 - **One-click Windows setup** — double-click `start.bat` to create a venv,
@@ -95,7 +103,7 @@ cross-compile, so build on Windows (CI builds it on `windows-latest`).
 **macOS / Linux**
 
 ```bash
-pip install httpx          # optional, but needed for true streaming
+pip install httpx          # optional; the stdlib transport streams too
 python -m gemini_web2api
 ```
 
@@ -213,7 +221,7 @@ gemini
 
 ### Codex CLI
 
-Uses the Responses API (`/v1/responses`) with the full streaming event sequence.
+Uses the Responses API (`/v1/responses`) with the full streaming event sequence — plain replies stream token by token as they are generated (tool and JSON replies are buffered, since both need the complete reply).
 
 ## Models
 
@@ -459,7 +467,7 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api tests
 ```
 
-717 tests, all offline — the Gemini wire protocol is faked at the frame level.
+756 tests, all offline — the Gemini wire protocol is faked at the frame level.
 CI covers Python 3.8–3.13, a stdlib-only run with no third-party packages, a
 build-and-install-the-wheel check, lint and a Docker build.
 

@@ -128,8 +128,10 @@ def instruction_for(spec):
         return ""
     if spec["kind"] == JSON_OBJECT:
         return _INSTRUCTION_JSON_OBJECT
+    # Compact for the same reason as the tool schema: this is prompt text the
+    # upstream must prefill, and indentation is ~20% more of it for no gain.
     return _INSTRUCTION_JSON_SCHEMA + json.dumps(
-        spec["schema"], indent=2, ensure_ascii=False, sort_keys=True)
+        spec["schema"], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def extract_json(text):
