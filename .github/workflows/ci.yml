@@ -87,7 +87,7 @@ jobs:
         run: |
           mkdir -p /tmp/sdist
           tar -xzf dist/*.tar.gz -C /tmp/sdist
-          cd /tmp/sdist/gemini-web2api-*/
+          cd /tmp/sdist/gemini_web2api-*/
           set +e
           python -m unittest discover -s tests -t . > /tmp/sdist-suite.txt 2>&1
           status=$?
