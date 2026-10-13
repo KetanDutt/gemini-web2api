@@ -41,6 +41,8 @@ def build_parser():
     parser.add_argument("--config", type=str, default=None, help="path to config.json")
     parser.add_argument("--cookie-file", type=str, default=None,
                         help="path to a cookie file or gemini-auth.json")
+    parser.add_argument("--cookie-files", action="append", default=None,
+                        help="additional cookie file for account rotation (repeatable)")
     parser.add_argument("--proxy", type=str, default=None,
                         help="HTTP proxy, e.g. http://127.0.0.1:7890")
     parser.add_argument("--api-key", action="append", default=None, dest="api_keys",
@@ -55,6 +57,13 @@ def build_parser():
                         help="max requests per window per key/IP (0 disables)")
     parser.add_argument("--rate-limit-window", type=int, default=None, metavar="SEC",
                         help="rate limit window in seconds (default 60)")
+    parser.add_argument("--max-concurrent", type=int, default=None, metavar="N",
+                        dest="max_concurrent_requests",
+                        help="max simultaneous upstream generations; extra requests "
+                             "get 503 (default 0 = unlimited)")
+    parser.add_argument("--trust-proxy-headers", action="store_true", default=None,
+                        help="take the client address from X-Forwarded-For "
+                             "(only behind a reverse proxy you control)")
     parser.add_argument("--quiet", action="store_true", help="disable request logging")
     parser.add_argument("--no-auto-bl", action="store_true",
                         help="do not refresh the build tag from upstream at startup")
@@ -71,6 +80,8 @@ def apply_cli_overrides(args):
         applied["port"] = args.port
     if args.cookie_file:
         applied["cookie_file"] = args.cookie_file
+    if args.cookie_files:
+        applied["cookie_files"] = list(args.cookie_files)
     if args.proxy:
         applied["proxy"] = args.proxy
     if args.api_keys:
@@ -89,6 +100,10 @@ def apply_cli_overrides(args):
         applied["rate_limit_max"] = args.rate_limit
     if args.rate_limit_window is not None:
         applied["rate_limit_window_sec"] = args.rate_limit_window
+    if args.max_concurrent_requests is not None:
+        applied["max_concurrent_requests"] = args.max_concurrent_requests
+    if args.trust_proxy_headers:
+        applied["trust_proxy_headers"] = True
     if args.log_level:
         set_log_level(args.log_level)
 
@@ -152,21 +167,29 @@ def main(argv=None, on_ready=None):
         print(f"error: cannot bind {host}:{port} — {exc}", file=sys.stderr)
         return 1
 
-    # Resolve the build tag and pre-read the cookie before serving, so the first
-    # request is not paying for either. Never fatal.
-    try:
-        warm_up()
-    except Exception as exc:  # pragma: no cover - defensive
-        print(f"  ⚠ startup warm-up failed: {exc}", file=sys.stderr)
+    # Resolve the build tag, pre-read the cookie and warm the transport in the
+    # background. This used to run inline before serve_forever, so a slow or
+    # unreachable network held the (already bound) socket unserved for the
+    # whole scrape timeout — up to 8 s where the process looked hung and a
+    # container healthcheck could kill it before it ever answered. Serving
+    # starts immediately instead; a first request that races the warm-up may
+    # pay for the cookie read or the handshake itself, and a stale build tag
+    # is still healed by the 405 refresh-and-retry path. Never fatal.
+    warm_up_fn, preconnect_fn = warm_up, preconnect
+
+    def _warm_up_in_background():
+        try:
+            warm_up_fn()
+        except Exception as exc:  # pragma: no cover - defensive
+            print(f"  ⚠ startup warm-up failed: {exc}", file=sys.stderr)
+        preconnect_fn()
+
+    threading.Thread(target=_warm_up_in_background, daemon=True, name="warm-up").start()
 
     print_banner(server)
 
     if on_ready is not None:
         on_ready(server.server_address[1])
-
-    # Warm the transport in the background: the banner should not wait on a
-    # handshake, but the first request should not pay for one either.
-    threading.Thread(target=preconnect, daemon=True).start()
 
     stopping = [False]
 

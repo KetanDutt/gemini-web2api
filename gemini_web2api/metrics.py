@@ -32,12 +32,19 @@ _counters = {
     "errors_5xx": 0,
     "upstream_failures": 0,
     "rate_limited": 0,
+    "server_busy": 0,
     "images_uploaded": 0,
     "tool_calls_parsed": 0,
     # Requests where the client asked for JSON and the model did not comply.
     # Separate from upstream_failures because the upstream answered fine — it
     # just answered prose, which only a client with a parser cares about.
     "json_mode_failures": 0,
+}
+_gauges = {
+    # Upstream generations running right now. A gauge, not a counter: it
+    # goes back down as requests finish, which is what makes it useful for
+    # spotting saturation against `max_concurrent_requests`.
+    "in_flight": 0,
 }
 _latency = [0] * (len(_LATENCY_BUCKETS) + 1)
 _latency_sum = [0.0]
@@ -52,6 +59,13 @@ def inc(name, amount=1):
     with _lock:
         if name in _counters:
             _counters[name] += amount
+
+
+def adjust_gauge(name, delta):
+    """Move a gauge by ``delta``, ignoring unknown names (like :func:`inc`)."""
+    with _lock:
+        if name in _gauges:
+            _gauges[name] = max(0, _gauges[name] + delta)
 
 
 def record_status(status):
@@ -138,6 +152,7 @@ def snapshot():
         return {
             "uptime_sec": round(uptime(), 1),
             "counters": dict(_counters),
+            "gauges": dict(_gauges),
             "status_codes": dict(sorted(_by_status.items())),
             "latency_ms_avg": round(average, 1),
             "latency_ms_samples": _latency_count[0],
@@ -156,6 +171,8 @@ def reset():
         _START = time.time()
         for key in _counters:
             _counters[key] = 0
+        for key in _gauges:
+            _gauges[key] = 0
         for index in range(len(_latency)):
             _latency[index] = 0
         _latency_sum[0] = 0.0

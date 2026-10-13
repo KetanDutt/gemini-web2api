@@ -37,8 +37,13 @@ Docker's `HEALTHCHECK` already points at `/health`; see
 `GET /metrics` (Prometheus text exposition, auth-gated when keys are set)
 exports:
 
-* **Counters** — `requests`, `errors`, `rate_limited`, `upstream_failures`,
-  `images_uploaded`, `tool_calls_parsed`, per-model and per-status-code.
+* **Counters** — `requests`, `errors`, `rate_limited`, `server_busy`,
+  `upstream_failures`, `images_uploaded`, `tool_calls_parsed`, per-model
+  and per-status-code.
+* **Gauges** — `in_flight_requests`: generations running right now. Alert on
+  it sitting at `max_concurrent_requests` while `server_busy` climbs: the
+  server is refusing work it could not have run anyway, and the remedy is
+  more accounts or a higher limit, not a restart.
 * **Latency histogram** — `latency_ms` in milliseconds, so p50/p95/p99 come
   from `histogram_quantile` on your side.
 
@@ -49,6 +54,7 @@ Alert on what a human would notice:
 | Error rate | `rate(errors[5m]) / rate(requests[5m])` | Something is broken |
 | Upstream failures | `rate(upstream_failures[5m])` | Gemini is unhappy (405/429/5xx) |
 | Rate-limited clients | `rate(rate_limited[5m])` | Your limit is biting real users |
+| Busy rejections | `rate(server_busy_total[5m])` | Concurrency limit reached; clients should honour `Retry-After` |
 | Latency | `histogram_quantile(0.95, rate(latency_ms_bucket[5m]))` | Upstream slowdown |
 
 `GET /status` (auth-gated) is the human-readable version of the same data:
@@ -146,6 +152,11 @@ per-process. That makes a single replica simple and predictable, and it means:
   more replicas only help if you also rotate more accounts
   (`cookie_files`), because the pool — not the process — is the concurrency
   limit for a single account.
+* **Bound the work in flight.** Set `max_concurrent_requests` so a traffic
+  burst fails fast with `503 server_busy` instead of piling up handler
+  threads behind a slow upstream. Watch `concurrency.in_flight` in
+  `/status` (or the dashboard's *In flight* tile) to size it: the right
+  value is a little above your normal peak, not your hoped-for maximum.
 
 ## Backup and restore
 

@@ -4,7 +4,9 @@ Built on :mod:`http.server` so the project keeps working with no third-party
 dependencies. Runs HTTP/1.1 with keep-alive; SSE responses opt out of keep-alive
 because they have no Content-Length.
 """
+import gzip
 import hmac
+import ipaddress
 import json
 import platform
 import re
@@ -13,17 +15,18 @@ import sys
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import __version__, jsonmode, prometheus
 from .config import CONFIG
 from .config import snapshot as config_snapshot
 from .gemini import HAS_HTTPX, generate, generate_stream, log
 from .gemini import pool_snapshot as cookie_pool_snapshot
+from .metrics import adjust_gauge, inc, record_latency, record_request, record_status
 from .metrics import history as metrics_history
-from .metrics import inc, record_latency, record_request, record_status
 from .metrics import snapshot as metrics_snapshot
 from .models import (
     MODE_CATEGORY,
@@ -76,6 +79,26 @@ _DASHBOARD_CSP = (
     "frame-ancestors 'none'"
 )
 
+# Serialised bodies for responses that cannot change while the process runs.
+# `/v1/models` is the endpoint clients poll most (SDKs fetch it on startup and
+# on every reconnect), and re-serialising the same nine dicts for every poll
+# is pure waste; the bytes are built once and then only written out.
+_STATIC_JSON_BODIES = {}
+
+
+def _static_json_body(key, producer):
+    """Return the cached JSON bytes for ``key``, building them once."""
+    body = _STATIC_JSON_BODIES.get(key)
+    if body is None:
+        body = json.dumps(producer(), ensure_ascii=False, default=str).encode("utf-8")
+        _STATIC_JSON_BODIES[key] = body
+    return body
+
+
+#: Bodies smaller than this are not worth a gzip pass: the CPU and the ~20-byte
+#: header would cost more than the bytes saved on any link.
+_GZIP_MIN_BYTES = 1024
+
 
 def _usage(prompt, text):
     """Approximate token counts.
@@ -114,10 +137,8 @@ def _upload_images(images):
     """
     if not images:
         return None
-    file_refs = []
-    for item in images:
-        if not (isinstance(item, tuple) and len(item) == 2):
-            continue
+
+    def fetch_and_upload(item):
         data, mime = item
         if isinstance(data, str):
             fetched = fetch_image_bytes(data)
@@ -128,13 +149,115 @@ def _upload_images(images):
             raise ImageRejected("empty image payload")
         mime = detect_image_mime(data, mime or "image/png")
         try:
-            file_refs.append(upload_image(data, "image.png", mime or "image/png"))
+            return upload_image(data, "image.png", mime or "image/png")
         except Exception as exc:
             raise RuntimeError(f"image upload failed: {exc}") from exc
+
+    valid = [item for item in images
+             if isinstance(item, tuple) and len(item) == 2]
+    if not valid:
+        return None
+    if len(valid) == 1:
+        file_refs = [fetch_and_upload(valid[0])]
+    else:
+        # Images are independent of one another, and each one costs a remote
+        # fetch plus two upload round trips. Doing them one at a time made a
+        # four-image request pay four serial latencies before the prompt was
+        # even sent; four workers bound the extra connections while covering
+        # the image counts chat clients actually send. Results are collected
+        # in input order (Gemini attaches references positionally), and the
+        # first failure in input order is the one reported, exactly as the
+        # sequential loop reported it.
+        file_refs = []
+        first_error = None
+        with ThreadPoolExecutor(max_workers=min(4, len(valid)),
+                                thread_name_prefix="image-upload") as pool:
+            futures = [pool.submit(fetch_and_upload, item) for item in valid]
+            for index, future in enumerate(futures):
+                try:
+                    file_refs.append(future.result())
+                except Exception as exc:  # ImageRejected or RuntimeError
+                    if first_error is None:
+                        first_error = exc
+                        for pending in futures[index + 1:]:
+                            pending.cancel()
+                    file_refs.append(None)
+        if first_error is not None:
+            raise first_error
     if not file_refs:
         return None
     inc("images_uploaded", len(file_refs))
     return file_refs
+
+
+class GenerationBusy(Exception):
+    """All generation slots are in use. Maps to HTTP 503, not 502.
+
+    The upstream did not fail — this server refused to start more work.
+    Those are different events with different remedies (wait, versus fix the
+    upstream), so they must not share a status code or a counter.
+    """
+
+
+# ─── generation backpressure ─────────────────────────────────────────────────
+# One upstream generation occupies a handler thread for seconds to tens of
+# seconds. With no bound, a burst of clients becomes a burst of threads all
+# waiting on Google — the slow-loris-shaped hole docs/SECURITY.md calls out.
+# `max_concurrent_requests` caps how many generations run at once; the rest
+# fail fast with 503 + Retry-After instead of queueing invisibly.
+_gen_slot_lock = threading.Lock()
+_gen_slot_state = {"limit": None, "semaphore": None}
+
+#: Seconds a busy rejection suggests the client wait before retrying.
+BUSY_RETRY_AFTER_SEC = 5
+
+
+def _acquire_generation_slot():
+    """Take a generation slot.
+
+    Returns the semaphore to release (``None`` when unlimited), or ``False``
+    when the configured limit is already reached. The semaphore is rebuilt
+    when the configured limit changes, so a runtime config edit takes effect
+    without dropping slots other requests are still holding — they release
+    against the semaphore they acquired from.
+    """
+    try:
+        limit = int(CONFIG.get("max_concurrent_requests") or 0)
+    except (TypeError, ValueError):
+        limit = 0
+    if limit < 0:
+        limit = 0
+    with _gen_slot_lock:
+        if _gen_slot_state["limit"] != limit:
+            _gen_slot_state["semaphore"] = (
+                threading.BoundedSemaphore(limit) if limit > 0 else None)
+            _gen_slot_state["limit"] = limit
+        semaphore = _gen_slot_state["semaphore"]
+    if semaphore is not None and not semaphore.acquire(blocking=False):
+        return False
+    adjust_gauge("in_flight", 1)
+    return semaphore
+
+
+def _release_generation_slot(semaphore):
+    adjust_gauge("in_flight", -1)
+    if semaphore is not None:
+        semaphore.release()
+
+
+def generation_capacity():
+    """Current ``{in_flight, max}`` for /status and the dashboard.
+
+    ``max`` is read from the live config rather than the slot cache, so the
+    number an operator sees is the number they configured even before the
+    next request rebuilds the semaphore.
+    """
+    try:
+        limit = max(0, int(CONFIG.get("max_concurrent_requests") or 0))
+    except (TypeError, ValueError):
+        limit = 0
+    return {"in_flight": metrics_snapshot()["gauges"].get("in_flight", 0),
+            "max": limit}
 
 
 class GeminiHandler(BaseHTTPRequestHandler):
@@ -152,6 +275,21 @@ class GeminiHandler(BaseHTTPRequestHandler):
     # ─── plumbing ────────────────────────────────────────────────────────────
 
     def __init__(self, *args, **kwargs):
+        self._reset_request_state()
+        super().__init__(*args, **kwargs)
+
+    def _reset_request_state(self):
+        """(Re)initialise everything that belongs to one request.
+
+        One handler instance lives for a whole keep-alive connection, and
+        SDK clients pool connections — so without this reset, every request
+        after the first on a connection shared the first request's ID, was
+        invisible to the request counter and the history (both latch after
+        one use), inherited its model attribution and its rate-limit
+        headers, and measured its duration from when the *connection*
+        opened. Only the parse caches were reset originally; the accounting
+        state is per-request too, and now all of it is reset together.
+        """
         self.request_id = uuid.uuid4().hex[:12]
         self._started = time.time()
         self._headers_sent = False
@@ -166,7 +304,19 @@ class GeminiHandler(BaseHTTPRequestHandler):
         # Rate-limit response headers, filled by _check_rate_limit for API
         # paths and merged into whatever response is sent.
         self._rate_limit_headers = {}
-        super().__init__(*args, **kwargs)
+        # Request-scoped parse caches. The request target, headers and query
+        # cannot change during a request, yet routing, auth, rate limiting
+        # and history each re-split the path and re-parsed the query string;
+        # on this stdlib stack that parsing is a visible slice of the ~1 ms
+        # of local overhead a request carries.
+        self._split_cached = None
+        self._query_cached = None
+        self._presented_key_cached = None
+
+    def handle_one_request(self):
+        """Serve one request on this connection, with fresh per-request state."""
+        self._reset_request_state()
+        super().handle_one_request()
 
     def send_response(self, code, message=None):
         """Send the status line plus the headers every response should carry.
@@ -181,6 +331,12 @@ class GeminiHandler(BaseHTTPRequestHandler):
         super().send_response(code, message)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        # The request ID belongs here, not only in the JSON helpers: the
+        # stock error pages for malformed requests never reach those, and
+        # "every response carries an X-Request-Id" should be true of them
+        # too — a rejected request line is exactly the kind of event an
+        # operator later tries to correlate.
+        self.send_header("X-Request-Id", self.request_id)
 
     def log_message(self, fmt, *args):
         client_ip = self.client_address[0] if self.client_address else "-"
@@ -192,31 +348,87 @@ class GeminiHandler(BaseHTTPRequestHandler):
         Routing used to compare ``self.path`` exactly, so ``/v1/models?limit=10``
         — which real OpenAI clients send — returned 404.
         """
+        cached = getattr(self, "_split_cached", None)
+        if cached is not None:
+            return cached
         parts = urlsplit(self.path)
         path = unquote(parts.path) or "/"
         if len(path) > 1:
             path = path.rstrip("/")
-        return path, parts.query
+        cached = (path, parts.query)
+        self._split_cached = cached
+        return cached
 
     @property
     def query_params(self):
-        from urllib.parse import parse_qs
-        _, query = self._split_path()
-        return parse_qs(query)
+        cached = getattr(self, "_query_cached", None)
+        if cached is None:
+            _, query = self._split_path()
+            cached = parse_qs(query)
+            self._query_cached = cached
+        return cached
 
     def _cors_headers(self):
+        # X-Request-Id is not repeated here: send_response already emits it
+        # for every response, and sending it twice would hand clients two
+        # values to disagree about.
         return {
             "Access-Control-Allow-Origin": CONFIG.get("cors_origin", "*"),
             "Access-Control-Expose-Headers": "X-Request-Id",
-            "X-Request-Id": self.request_id,
         }
+
+    def _wants_gzip(self):
+        """True when the client advertised gzip and did not refuse it (q=0)."""
+        header = self.headers.get("Accept-Encoding") or ""
+        for item in header.split(","):
+            pieces = [piece.strip() for piece in item.split(";")]
+            if not pieces or pieces[0].lower() not in ("gzip", "*"):
+                continue
+            quality = 1.0
+            for piece in pieces[1:]:
+                if piece.lower().startswith("q="):
+                    try:
+                        quality = float(piece[2:])
+                    except ValueError:
+                        quality = 0.0
+            return quality > 0
+        return False
+
+    def _encode_body(self, body):
+        """Return ``(body, encoding)``, gzipping when it pays.
+
+        The dashboard is ~190 KB of HTML and a long completion is tens of KB
+        of JSON; over any real network the transfer dwarfs the ~1 ms the
+        compression costs, and every HTTP client library already sends
+        ``Accept-Encoding: gzip`` and decompresses transparently. Callers
+        that did not advertise gzip — raw sockets, most test clients — get
+        exactly the bytes they got before. SSE is never routed through here:
+        compressing a stream would buffer it and destroy time-to-first-token.
+        """
+        if len(body) < _GZIP_MIN_BYTES or not self._wants_gzip():
+            return body, None
+        compressed = gzip.compress(body, compresslevel=6)
+        if len(compressed) >= len(body):
+            return body, None
+        return compressed, "gzip"
+
+    def _send_encoding_headers(self, encoding):
+        if encoding:
+            self.send_header("Content-Encoding", encoding)
+            self.send_header("Vary", "Accept-Encoding")
 
     def send_json(self, data, status=200, extra_headers=None):
         """Serialise ``data`` as JSON with an accurate Content-Length."""
         body = json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
+        self.send_json_bytes(body, status, extra_headers)
+
+    def send_json_bytes(self, body, status=200, extra_headers=None):
+        """Write pre-serialised JSON ``body`` with an accurate Content-Length."""
+        body, encoding = self._encode_body(body)
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self._send_encoding_headers(encoding)
         for key, value in self._cors_headers().items():
             self.send_header(key, value)
         # Rate-limit headers first so an explicit extra (Retry-After on a 429)
@@ -233,9 +445,11 @@ class GeminiHandler(BaseHTTPRequestHandler):
     def send_html(self, body, status=200):
         if isinstance(body, str):
             body = body.encode("utf-8")
+        body, encoding = self._encode_body(body)
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self._send_encoding_headers(encoding)
         self.send_header("Cache-Control", "no-store")
         # The console must not be framable (clickjacking) and must not load
         # anything off-origin; see _DASHBOARD_CSP above for what the policy
@@ -255,9 +469,11 @@ class GeminiHandler(BaseHTTPRequestHandler):
         """Write a non-HTML text body with an accurate Content-Length."""
         if isinstance(body, str):
             body = body.encode("utf-8")
+        body, encoding = self._encode_body(body)
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        self._send_encoding_headers(encoding)
         self.send_header("Cache-Control", "no-store")
         for key, value in self._cors_headers().items():
             self.send_header(key, value)
@@ -336,7 +552,7 @@ class GeminiHandler(BaseHTTPRequestHandler):
             "status": status,
             "model": self._model_name,
             "ms": round((time.time() - self._started) * 1000.0, 1),
-            "client": self.client_address[0] if self.client_address else None,
+            "client": self._client_ip(),
         })
 
     def _start_sse(self):
@@ -452,17 +668,26 @@ class GeminiHandler(BaseHTTPRequestHandler):
 
     def _presented_key(self):
         """The credential the caller supplied, from any supported location."""
+        cached = getattr(self, "_presented_key_cached", None)
+        if cached is not None:
+            return cached
+        presented = ""
         auth = self.headers.get("Authorization") or ""
         if auth.lower().startswith("bearer "):
-            return auth[7:].strip()
-        for header in ("x-api-key", "x-goog-api-key"):
-            value = self.headers.get(header)
-            if value:
-                return value.strip()
-        for key, values in self.query_params.items():
-            if key.lower() in ("key", "api_key") and values:
-                return values[0]
-        return ""
+            presented = auth[7:].strip()
+        else:
+            for header in ("x-api-key", "x-goog-api-key"):
+                value = self.headers.get(header)
+                if value:
+                    presented = value.strip()
+                    break
+            else:
+                for key, values in self.query_params.items():
+                    if key.lower() in ("key", "api_key") and values:
+                        presented = values[0]
+                        break
+        self._presented_key_cached = presented
+        return presented
 
     def _authorized(self):
         keys = CONFIG.get("api_keys") or []
@@ -475,8 +700,32 @@ class GeminiHandler(BaseHTTPRequestHandler):
         # differing byte and leak the key length/timing.
         return any(hmac.compare_digest(presented, str(key)) for key in keys)
 
+    def _client_ip(self):
+        """The client address to attribute this request to.
+
+        The socket peer, unless the operator enabled `trust_proxy_headers`
+        and a proxy supplied `X-Forwarded-For` — in which case the first
+        (original client) entry wins. The header is only honoured on the
+        operator's word because it is trivially spoofable: with the flag
+        off, a client claiming a fresh forwarded address per request would
+        otherwise mint itself a fresh rate-limit bucket each time. A
+        malformed value falls back to the peer rather than trusting text
+        that is not an address at all.
+        """
+        peer = self.client_address[0] if self.client_address else "unknown"
+        if not CONFIG.get("trust_proxy_headers"):
+            return peer
+        forwarded = self.headers.get("X-Forwarded-For") or ""
+        candidate = forwarded.split(",", 1)[0].strip()
+        if not candidate:
+            return peer
+        try:
+            return str(ipaddress.ip_address(candidate))
+        except ValueError:
+            return peer
+
     def _rate_limit_key(self):
-        return self._presented_key() or (self.client_address[0] if self.client_address else "unknown")
+        return self._presented_key() or self._client_ip()
 
     def _check_rate_limit(self):
         if not LIMITER.enabled:
@@ -564,11 +813,13 @@ class GeminiHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/v1/models":
-            self.send_json({"object": "list", "data": model_list()})
+            self.send_json_bytes(_static_json_body(
+                "openai_models", lambda: {"object": "list", "data": model_list()}))
         elif path.startswith("/v1/models/"):
             self._openai_model_detail(path[len("/v1/models/"):])
         elif path == "/v1beta/models":
-            self.send_json({"models": google_model_list()})
+            self.send_json_bytes(_static_json_body(
+                "google_models", lambda: {"models": google_model_list()}))
         elif path.startswith("/v1beta/models/"):
             self._google_model_detail(path[len("/v1beta/models/"):])
         elif path in ("/health", "/healthz", "/live"):
@@ -720,13 +971,51 @@ class GeminiHandler(BaseHTTPRequestHandler):
         return name, model_id, think_mode, extra
 
     def _generate(self, prompt, model_id, think_mode, file_refs, extra_fields, model_name):
-        """Non-streaming generation with latency tracking."""
+        """Non-streaming generation with latency tracking.
+
+        Holds a generation slot for the whole upstream call; when the
+        configured concurrency limit is already reached this raises
+        :class:`GenerationBusy` instead of starting work the server has
+        already said it cannot run concurrently.
+        """
+        slot = _acquire_generation_slot()
+        if slot is False:
+            inc("server_busy")
+            raise GenerationBusy(
+                "too many concurrent requests; retry shortly")
         started = time.time()
         try:
-            text = generate(prompt, model_id, think_mode, file_refs, extra_fields)
+            return generate(prompt, model_id, think_mode, file_refs, extra_fields)
         finally:
             record_latency(model_name, time.time() - started)
-        return text
+            _release_generation_slot(slot)
+
+    def _busy_response(self):
+        """Answer 503 for a generation refused by the concurrency limit."""
+        inc("server_busy")
+        self.send_error_json(
+            503, "server is at its configured concurrency limit "
+            "(max_concurrent_requests); retry shortly",
+            "api_error", "server_busy",
+            extra_headers={"Retry-After": str(BUSY_RETRY_AFTER_SEC)})
+
+    def _run_streaming(self, stream_fn, *args):
+        """Run a true-streaming handler while holding a generation slot.
+
+        The slot is taken *before* the SSE headers go out, so a busy server
+        can still answer an honest 503; once the 200 is on the wire the only
+        failure channel left is an in-stream error frame, which is the wrong
+        shape for "we never started". The slot is held for the whole stream,
+        because the upstream call is.
+        """
+        slot = _acquire_generation_slot()
+        if slot is False:
+            self._busy_response()
+            return
+        try:
+            stream_fn(*args)
+        finally:
+            _release_generation_slot(slot)
 
     def _stream(self, prompt, model_id, think_mode, file_refs, extra_fields, model_name):
         started = time.time()
@@ -748,6 +1037,13 @@ class GeminiHandler(BaseHTTPRequestHandler):
 
     def _upstream_failure(self, exc):
         """Map an upstream exception onto an HTTP response."""
+        if isinstance(exc, GenerationBusy):
+            # Not an upstream failure and not counted as one: the upstream
+            # was never called. (_generate already counted the rejection.)
+            self.send_error_json(
+                503, f"server busy: {exc}", "api_error", "server_busy",
+                extra_headers={"Retry-After": str(BUSY_RETRY_AFTER_SEC)})
+            return
         inc("upstream_failures")
         status = getattr(exc, "status", None)
         if status == 429:
@@ -848,6 +1144,18 @@ class GeminiHandler(BaseHTTPRequestHandler):
             self.send_error_json(400, "'stream_options' must be an object",
                                  "invalid_request_error", "invalid_stream_options")
             return
+        # Same reasoning for tools/tool_choice: a non-list `tools` used to be
+        # truthy-checked into "the client wants tools" while contributing no
+        # declarations to the prompt, so the model was parsed for calls it was
+        # never told about. Both are client errors, answered before any work.
+        if tools is not None and not isinstance(tools, list):
+            self.send_error_json(400, "'tools' must be an array of tool objects",
+                                 "invalid_request_error", "invalid_tools")
+            return
+        if tool_choice is not None and not isinstance(tool_choice, (str, dict)):
+            self.send_error_json(400, "'tool_choice' must be a string or an object",
+                                 "invalid_request_error", "invalid_tool_choice")
+            return
         prompt, images = messages_to_prompt(messages, tools, tool_choice)
         if not prompt.strip():
             self.send_error_json(400, "empty prompt: 'messages' produced no content",
@@ -877,8 +1185,9 @@ class GeminiHandler(BaseHTTPRequestHandler):
         # be judged on the complete reply, and a violation must not be reported
         # after a 200 has already gone out.
         if stream and not wants_tools and not json_spec:
-            self._stream_chat(cid, model_name, model_id, think_mode, prompt,
-                              file_refs, extra_fields, include_usage)
+            self._run_streaming(self._stream_chat, cid, model_name, model_id,
+                                think_mode, prompt, file_refs, extra_fields,
+                                include_usage)
             return
 
         try:
@@ -1024,32 +1333,8 @@ class GeminiHandler(BaseHTTPRequestHandler):
         # Buffered in JSON mode so the reply can be validated before any part of
         # it is sent; a violation cannot be retracted after a 200 header.
         if stream and not json_spec:
-            self._start_sse()
-            inc("streams")
-            collected = []
-            try:
-                for delta in self._stream(raw_prompt, model_id, think_mode, None,
-                                          extra_fields, model_name):
-                    if not delta:
-                        continue
-                    collected.append(delta)
-                    if not self._sse_write({
-                        "id": cid, "object": "text_completion", "created": created,
-                        "model": model_name,
-                        "choices": [{"index": 0, "text": delta, "logprobs": None,
-                                     "finish_reason": None}],
-                    }):
-                        return
-            except Exception as exc:
-                log(f"{self.request_id} legacy stream error: {exc}", "error")
-                self._sse_write({"error": {"message": f"upstream error: {exc}",
-                                           "type": "api_error"}})
-            self._sse_write({
-                "id": cid, "object": "text_completion", "created": created, "model": model_name,
-                "choices": [{"index": 0, "text": "", "logprobs": None,
-                             "finish_reason": "stop"}],
-            })
-            self._sse_done()
+            self._run_streaming(self._stream_legacy, cid, created, raw_prompt,
+                                model_id, think_mode, extra_fields, model_name)
             return
 
         try:
@@ -1085,6 +1370,36 @@ class GeminiHandler(BaseHTTPRequestHandler):
                          "finish_reason": "stop"}],
             "usage": _usage(raw_prompt, text),
         })
+
+    def _stream_legacy(self, cid, created, raw_prompt, model_id, think_mode,
+                       extra_fields, model_name):
+        """Stream a legacy text completion, delta by delta."""
+        self._start_sse()
+        inc("streams")
+        collected = []
+        try:
+            for delta in self._stream(raw_prompt, model_id, think_mode, None,
+                                      extra_fields, model_name):
+                if not delta:
+                    continue
+                collected.append(delta)
+                if not self._sse_write({
+                    "id": cid, "object": "text_completion", "created": created,
+                    "model": model_name,
+                    "choices": [{"index": 0, "text": delta, "logprobs": None,
+                                 "finish_reason": None}],
+                }):
+                    return
+        except Exception as exc:
+            log(f"{self.request_id} legacy stream error: {exc}", "error")
+            self._sse_write({"error": {"message": f"upstream error: {exc}",
+                                       "type": "api_error"}})
+        self._sse_write({
+            "id": cid, "object": "text_completion", "created": created, "model": model_name,
+            "choices": [{"index": 0, "text": "", "logprobs": None,
+                         "finish_reason": "stop"}],
+        })
+        self._sse_done()
 
     # ─── /v1/responses (Codex CLI) ───────────────────────────────────────────
 
@@ -1184,6 +1499,10 @@ class GeminiHandler(BaseHTTPRequestHandler):
         messages = self._responses_to_messages(req)
         tools = req.get("tools")
         tool_choice = req.get("tool_choice", "auto")
+        if tools is not None and not isinstance(tools, list):
+            self.send_error_json(400, "'tools' must be an array of tool objects",
+                                 "invalid_request_error", "invalid_tools")
+            return
         prompt, images = messages_to_prompt(messages, tools, tool_choice)
         if not prompt.strip():
             self.send_error_json(400, "empty input", "invalid_request_error", "empty_input")
@@ -1199,6 +1518,16 @@ class GeminiHandler(BaseHTTPRequestHandler):
         log(f"{self.request_id} responses model={model_name} tools={wants_tools} "
             f"prompt_chars={len(prompt)} "
             f"json={json_spec['kind'] if json_spec else 'off'}")
+
+        # Plain text replies stream for real: Codex shows tokens as they
+        # arrive instead of staring at a spinner until the whole reply is
+        # buffered. Tool calls and JSON mode stay buffered — calls can only
+        # be recognised, and JSON only validated, once the reply is complete.
+        if req.get("stream") and not wants_tools and not json_spec:
+            self._run_streaming(self._stream_responses_live, model_name,
+                                model_id, think_mode, prompt, file_refs,
+                                extra_fields)
+            return
 
         try:
             text = self._generate(prompt, model_id, think_mode, file_refs, extra_fields, model_name)
@@ -1246,6 +1575,88 @@ class GeminiHandler(BaseHTTPRequestHandler):
                     "total_tokens": usage["total_tokens"],
                 },
             })
+
+    def _stream_responses_live(self, model_name, model_id, think_mode, prompt,
+                               file_refs, extra_fields):
+        """Stream a Responses reply as it is generated.
+
+        Same event sequence the buffered path emits — the ordering and
+        ``sequence_number`` are the contract Codex relies on — but each
+        ``response.output_text.delta`` goes out as the upstream produces it,
+        so time-to-first-token matches the chat endpoint instead of the
+        full generation time. A mid-stream failure closes with
+        ``response.failed``: the 200 is already on the wire, and a client
+        must be able to tell a failed stream from a completed one.
+        """
+        rid = f"resp_{uuid.uuid4().hex[:16]}"
+        mid = f"msg_{uuid.uuid4().hex[:12]}"
+        self._start_sse()
+        inc("streams")
+        sequence = [0]
+
+        def emit(event_type, **fields):
+            sequence[0] += 1
+            return self._sse_write(
+                {"type": event_type, "sequence_number": sequence[0], **fields},
+                event=event_type)
+
+        base = {"id": rid, "object": "response",
+                "created_at": int(time.time()), "model": model_name}
+        in_progress = {**base, "status": "in_progress", "output": [], "usage": None}
+        if not emit("response.created", response=in_progress):
+            return
+        if not emit("response.in_progress", response=in_progress):
+            return
+        if not emit("response.output_item.added", output_index=0, item={
+                "type": "message", "id": mid, "role": "assistant",
+                "status": "in_progress", "content": []}):
+            return
+        if not emit("response.content_part.added", item_id=mid, output_index=0,
+                    content_index=0,
+                    part={"type": "output_text", "text": "", "annotations": []}):
+            return
+
+        collected = []
+        try:
+            for delta in self._stream(prompt, model_id, think_mode, file_refs,
+                                      extra_fields, model_name):
+                if not delta:
+                    continue
+                collected.append(delta)
+                if not emit("response.output_text.delta", item_id=mid,
+                            output_index=0, content_index=0, delta=delta):
+                    return
+        except Exception as exc:
+            inc("upstream_failures")
+            log(f"{self.request_id} responses stream error after "
+                f"{sum(map(len, collected))} chars: {exc}", "error")
+            emit("response.failed", response={
+                **base, "status": "failed", "output": [],
+                "error": {"code": "upstream_error",
+                          "message": f"upstream error: {exc}"},
+            })
+            return
+
+        text = "".join(collected)
+        usage = _usage(prompt, text)
+        item = {
+            "type": "message", "id": mid, "role": "assistant",
+            "status": "completed",
+            "content": [{"type": "output_text", "text": text, "annotations": []}],
+        }
+        emit("response.output_text.done", item_id=mid, output_index=0,
+             content_index=0, text=text)
+        emit("response.content_part.done", item_id=mid, output_index=0,
+             content_index=0, part=item["content"][0])
+        emit("response.output_item.done", output_index=0, item=item)
+        emit("response.completed", response={
+            **base, "status": "completed", "output": [item],
+            "usage": {
+                "input_tokens": usage["prompt_tokens"],
+                "output_tokens": usage["completion_tokens"],
+                "total_tokens": usage["total_tokens"],
+            },
+        })
 
     def _stream_responses(self, rid, model_name, prompt, text, output):
         """Emit the Responses API event sequence.
@@ -1325,10 +1736,21 @@ class GeminiHandler(BaseHTTPRequestHandler):
             return
         model_name, model_id, think_mode, extra_fields = resolved
 
+        # Nested fields are only *usually* objects; a client that sends
+        # "toolConfig": "AUTO" used to crash here with AttributeError and
+        # get a 500 for a client error. Malformed means "ignored", and the
+        # empty-content check below still 400s when nothing usable remains.
         tool_config = req.get("toolConfig") or req.get("tool_config") or {}
-        fc_mode = (tool_config.get("functionCallingConfig")
-                   or tool_config.get("function_calling_config") or {}).get("mode", "AUTO")
-        has_tools = bool(req.get("tools")) and fc_mode != "NONE"
+        if not isinstance(tool_config, dict):
+            tool_config = {}
+        fc_config = (tool_config.get("functionCallingConfig")
+                     or tool_config.get("function_calling_config") or {})
+        if not isinstance(fc_config, dict):
+            fc_config = {}
+        fc_mode = fc_config.get("mode", "AUTO")
+        tools_field = req.get("tools")
+        has_tools = (bool(tools_field) and isinstance(tools_field, list)
+                     and fc_mode != "NONE")
 
         prompt, images = google_contents_to_prompt(req)
         if not prompt.strip():
@@ -1343,7 +1765,8 @@ class GeminiHandler(BaseHTTPRequestHandler):
             f"prompt_chars={len(prompt)}")
 
         if stream and not has_tools:
-            self._stream_google(model_name, model_id, think_mode, prompt, file_refs, extra_fields)
+            self._run_streaming(self._stream_google, model_name, model_id,
+                                think_mode, prompt, file_refs, extra_fields)
             return
 
         try:
@@ -1476,6 +1899,10 @@ class GeminiHandler(BaseHTTPRequestHandler):
         # Per-account health, so an operator can see which cookie is in use and
         # which is resting. Never the cookie itself.
         payload["credentials"] = cookie_pool_snapshot()
+        # Live capacity, so an operator (and the dashboard) can see the
+        # server approaching its configured concurrency limit before
+        # requests start failing busy.
+        payload["concurrency"] = generation_capacity()
         payload["python"] = platform.python_version()
         payload["platform"] = platform.platform()
         return payload

@@ -44,6 +44,7 @@ COUNTER_HELP = {
     "errors_5xx": "Responses with a 5xx status.",
     "upstream_failures": "Upstream calls that raised, streaming included.",
     "rate_limited": "Requests rejected by the built-in rate limiter.",
+    "server_busy": "Requests rejected because max_concurrent_requests was reached.",
     "images_uploaded": "Images uploaded to Gemini's own upload endpoint.",
     "tool_calls_parsed": "Tool calls parsed out of model replies.",
     "json_mode_failures": "Replies that did not satisfy the requested response_format.",
@@ -58,6 +59,9 @@ def render(state):
     lines = []
     _gauge(lines, "uptime_seconds", "Seconds since the process started.",
            _number(state.get("uptime_sec", 0)))
+    _gauge(lines, "in_flight_requests",
+           "Upstream generations running right now.",
+           _number((state.get("gauges") or {}).get("in_flight", 0)))
 
     counters = state.get("counters") or {}
     for name in sorted(counters):

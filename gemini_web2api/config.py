@@ -22,6 +22,9 @@ DEFAULT_CONFIG = {
     "port": 8081,
     "host": "0.0.0.0",
     "retry_attempts": 3,
+    # Cap on the exponential backoff between attempts (0.25 s, 0.5 s, 1 s, …
+    # up to this value), not a fixed sleep: the first retry — the transient
+    # case — should be quick, while a stuck upstream still gets breathing room.
     "retry_delay_sec": 2,
     "request_timeout_sec": 180,
     # How long to wait for the TCP+TLS handshake, separately from the read
@@ -65,6 +68,16 @@ DEFAULT_CONFIG = {
     # Sliding-window rate limit. 0 disables it.
     "rate_limit_max": 0,
     "rate_limit_window_sec": 60,
+    # Backpressure: how many upstream generations may run at once. 0 means
+    # unlimited (the historical behaviour); a positive value makes extra
+    # requests fail fast with 503 instead of queueing threads unboundedly
+    # behind a slow upstream. See docs/CONFIGURATION.md.
+    "max_concurrent_requests": 0,
+    # Only enable behind a reverse proxy you control: the client address
+    # (rate-limit key, history) is then taken from X-Forwarded-For. With it
+    # off — the default — the header is ignored, because any client could
+    # otherwise spoof its address and evade per-IP limits.
+    "trust_proxy_headers": False,
     # Value for the Access-Control-Allow-Origin response header.
     "cors_origin": "*",
     # Seconds to wait for in-flight requests to finish on shutdown.
@@ -83,7 +96,7 @@ CONFIG = copy.deepcopy(DEFAULT_CONFIG)
 
 # Keys whose environment representation needs custom parsing rather than the
 # generic bool/int/str coercion.
-_LIST_KEYS = {"api_keys"}
+_LIST_KEYS = {"api_keys", "cookie_files"}
 
 _lock = threading.RLock()
 
@@ -216,6 +229,24 @@ def _validate():
         CONFIG["connect_timeout_sec"] = CONFIG["request_timeout_sec"]
     if CONFIG.get("max_request_bytes", 0) <= 0:
         CONFIG["max_request_bytes"] = DEFAULT_CONFIG["max_request_bytes"]
+    if CONFIG.get("max_image_bytes", 0) <= 0:
+        _warn("config: max_image_bytes must be > 0, using the default")
+        CONFIG["max_image_bytes"] = DEFAULT_CONFIG["max_image_bytes"]
+    if CONFIG.get("max_concurrent_requests", 0) < 0:
+        _warn("config: max_concurrent_requests must be >= 0, using 0 (unlimited)")
+        CONFIG["max_concurrent_requests"] = 0
+    if CONFIG.get("rate_limit_window_sec", 0) <= 0:
+        _warn("config: rate_limit_window_sec must be > 0, using 60")
+        CONFIG["rate_limit_window_sec"] = 60
+    if CONFIG.get("cookie_cooldown_sec", 0) < 0:
+        _warn("config: cookie_cooldown_sec must be >= 0, using the default")
+        CONFIG["cookie_cooldown_sec"] = DEFAULT_CONFIG["cookie_cooldown_sec"]
+    if CONFIG.get("shutdown_timeout_sec", 0) < 0:
+        _warn("config: shutdown_timeout_sec must be >= 0, using the default")
+        CONFIG["shutdown_timeout_sec"] = DEFAULT_CONFIG["shutdown_timeout_sec"]
+    if CONFIG.get("history_max", 0) < 0:
+        _warn("config: history_max must be >= 0, using 0 (history disabled)")
+        CONFIG["history_max"] = 0
     if CONFIG.get("default_model") not in _known_models():
         _warn(
             f"config: default_model {CONFIG.get('default_model')!r} is not a known model, "

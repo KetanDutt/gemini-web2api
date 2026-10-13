@@ -26,8 +26,64 @@ was reproduced.
   skips this). `gemini_web2api.main` takes an optional `on_ready(port)` hook for
   this.
 
+- **Backpressure: `max_concurrent_requests`.** Caps how many upstream
+  generations run at once. Extra requests fail fast with `503 server_busy`
+  and `Retry-After: 5` (streaming included — the slot is taken before the
+  SSE headers), are counted in a new `server_busy` metric rather than as
+  upstream failures, and `/status` reports live `concurrency` capacity,
+  shown as an *In flight* tile on the dashboard. `--max-concurrent` on the
+  CLI. Default `0` keeps the previous unlimited behaviour.
+- **Real streaming for the Responses API.** Plain `stream: true` replies on
+  `/v1/responses` now emit `response.output_text.delta` events as the text
+  is generated, with the same event sequence and numbering Codex already
+  relied on; a mid-stream failure closes with `response.failed`. Tool and
+  JSON-mode replies remain buffered, since both need the complete reply.
+- **Proxy-aware client addresses: `trust_proxy_headers`.** Behind a reverse
+  proxy, rate limiting and request history can key on the first
+  `X-Forwarded-For` address instead of the proxy's. Off by default because
+  the header is spoofable without a proxy in front. `--trust-proxy-headers`
+  on the CLI.
+- **CI is back.** `.github/workflows/ci.yml` (test matrix 3.8–3.13, a
+  stdlib-only job, package build with the suite re-run from the extracted
+  sdist, lint, Docker build, Windows executable build) and
+  `.github/workflows/docker.yml` (multi-arch GHCR publish) are restored,
+  so the guards that assert CI's shape pass again instead of erroring on
+  a missing file.
+
+### Performance
+
+- **Responses arrive sooner at every stage of the path.** Startup no longer
+  blocks serving on the build-tag scrape (it warms up in the background, so a
+  slow network cannot leave a bound socket unserved), pooled `httpx`
+  connections now survive 120 s idle instead of httpx's 5 s default (so
+  ordinary chat pacing no longer pays a fresh TLS handshake per message), and
+  `preconnect()` warms the pool the configured transport actually uses.
+  Non-streaming replies are recovered by parsing only the tail frames of the
+  cumulative response instead of JSON-decoding every frame (about 7x less
+  parsing work on a 60-frame reply), payload encoding is byte-identical but
+  several times faster on long prompts, tool/JSON schemas are embedded in the
+  prompt compactly (less upstream prefill), HTTP retries back off from
+  0.25 s up to the `retry_delay_sec` cap instead of always sleeping the full
+  delay first, multi-image requests fetch and upload their images
+  concurrently, the build-tag scrape stops reading the page at the tag
+  instead of downloading all of it, model-list responses are serialised
+  once, and JSON/HTML/text responses are gzipped when the client advertises
+  it (the dashboard drops from ~190 KB to ~46 KB). Streaming (SSE) responses
+  are deliberately never compressed, so time-to-first-token is unchanged.
+
 ### Changed
 
+- **The web console's design system went to v3 — quieter and more spatial.**
+  Glass is now spent only where depth explains hierarchy: the scrolled topbar,
+  navigation rail, menus, dialogs, toasts and the composer float; panels,
+  tables, lists and the new unified status-metric surfaces are near-solid, so
+  scrolling content no longer pays for layers of backdrop blur. The workspace
+  is borderless over a near-invisible ambient field, the topbar stays
+  transparent until the page scrolls, the navigation glider and the selected
+  conversation use the accent tint, and the brand mark is a monochrome glyph
+  in the product accent. Same pages, routes, IDs and behaviour; WCAG AA
+  contrast, focus rings and the reduced-motion / reduced-transparency /
+  high-contrast preferences are unchanged and still test-enforced.
 - **Colours and materials are closer to Apple's Liquid Glass.** The light
   canvas is cooler and carries three ambient tints (`--tint-a/b/c`) that the
   glass refracts, the accent is the brighter indigo from GlassGem, filled
@@ -204,6 +260,39 @@ was reproduced.
   stays inside 120–520 ms.
 
 ---
+
+### Fixed
+
+- **Keep-alive requests are counted again.** One handler serves a whole
+  connection, and per-request state (counter latches, history latch,
+  request ID, start time, model attribution, rate-limit headers) was only
+  reset for the parse caches. Every request after the first on a pooled
+  connection — which is how SDK clients actually talk — was invisible to
+  the request counter and history and reused the first request's ID. All
+  per-request state is now reset together in `handle_one_request`.
+- **`GEMINI_WEB2API_COOKIE_FILES` works.** `cookie_files` was missing from
+  the list-typed config keys, so the documented environment variable was
+  stored as one raw string and the extra accounts were silently ignored;
+  it now accepts the same comma/pipe/JSON forms as `api_keys`, in the
+  file and the environment alike. `--cookie-files` (repeatable) joins
+  `--cookie-file` on the CLI.
+- **Mistyped nested fields are no longer 500s.** A Google request with
+  `"toolConfig": "AUTO"` (or a non-object `functionCallingConfig`)
+  crashed conversion with `AttributeError`; malformed nested structures
+  are now ignored field-by-field. Chat/Responses requests with a non-list
+  `tools` or a non-scalar `tool_choice` get a `400
+  invalid_tools`/`invalid_tool_choice` instead of being half-honoured.
+- **Every response really carries `X-Request-Id`.** It moved into
+  `send_response`, so the stock error pages for malformed requests — the
+  ones that never reach the JSON helpers — carry it too, and no response
+  sends it twice.
+- Nonsensical numeric configuration (`max_image_bytes: 0`, a negative
+  concurrency limit or cooldown, a zero rate-limit window, …) is clamped
+  with a startup warning instead of being kept and misbehaving later.
+- Stale "streaming requires httpx" claims in `requirements.txt`, the
+  launcher shim and the README: the stdlib transport streams
+  incrementally and pools connections too.
+
 
 ## [1.3.0]
 

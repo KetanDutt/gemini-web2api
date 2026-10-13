@@ -352,8 +352,10 @@ forwarding and the typewriter effect disappears. The server sends
 explicitly in the proxy config is more robust.
 
 Keep the client IP accurate (`X-Real-IP` / `X-Forwarded-For`) if you rely on
-IP-based rate limiting; the server sees the proxy's address otherwise, so prefer
-key-based limiting behind a proxy.
+IP-based rate limiting. The server ignores `X-Forwarded-For` until you set
+`trust_proxy_headers: true` — do that when (and only when) one of these
+proxies is in front, so rate limiting and history see the real client instead
+of the proxy, and nobody can spoof their way into a fresh limit bucket.
 
 ### Caddy
 

@@ -230,6 +230,18 @@ Shared mutable state is deliberately minimal:
 | `bl` refresh | `_bl_lock` plus a 60-second cooldown |
 | metrics | single lock |
 | rate limiter | single lock |
+| generation slots | one `BoundedSemaphore`, rebuilt when the limit changes |
+
+`max_concurrent_requests` bounds how many generations run at once. The slot
+is taken before SSE headers are sent (so a busy server can still answer
+503) and released against the semaphore it was acquired from, which is
+what makes a runtime limit change safe.
+
+Per-request handler state is reset in `handle_one_request`, not trusted
+to `__init__`: one handler serves a whole keep-alive connection, and SDK
+clients pool connections, so anything latched per handler (counters,
+history, request ID, rate-limit headers) would otherwise describe the
+connection's first request forever.
 
 The pooled httpx client is the reason non-streaming requests got faster: the old
 code constructed a client per request and paid a full TLS handshake every time.

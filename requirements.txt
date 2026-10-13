@@ -1,6 +1,7 @@
 # gemini-web2api runs on the Python standard library alone.
 #
-# httpx is strongly recommended: it provides true incremental streaming for
-# "stream": true plus connection pooling and keep-alive to the upstream. Without
-# it, streaming still works but is buffered and delivered as a single chunk.
+# httpx is recommended: it provides an HTTP/2-capable transport with
+# connection pooling and keep-alive to the upstream. Without it, the stdlib
+# transport is used — streaming is still incremental and connections are
+# still pooled; only the transport differs.
 httpx>=0.25

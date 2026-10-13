@@ -30,6 +30,7 @@ _FALLBACK_PUSH_ID = "feeds/mcudyrk2a4khkz"
 _FALLBACK_PCTX = "CgcSBWjK7pYx"
 
 _page_tokens_cache = {"tokens": {}, "ts": 0.0}
+_page_tokens_lock = threading.Lock()
 _PAGE_TOKEN_TTL_SEC = 600
 
 # WIZ_global_data keys are obfuscated and do rotate, so several historical
@@ -251,10 +252,18 @@ def _get_page_tokens():
 
 def _cached_page_tokens():
     now = time.time()
-    if now - _page_tokens_cache["ts"] > _PAGE_TOKEN_TTL_SEC or not _page_tokens_cache["tokens"]:
-        _page_tokens_cache["tokens"] = _get_page_tokens()
-        _page_tokens_cache["ts"] = now
-    return _page_tokens_cache["tokens"]
+    if now - _page_tokens_cache["ts"] <= _PAGE_TOKEN_TTL_SEC and _page_tokens_cache["tokens"]:
+        return _page_tokens_cache["tokens"]
+    # Double-checked under a lock: image uploads now run concurrently, and
+    # without this every simultaneous first upload scraped the Gemini page
+    # for the same tokens — a stampede of the largest download on this path,
+    # once per image, exactly when the cache was cold.
+    with _page_tokens_lock:
+        now = time.time()
+        if now - _page_tokens_cache["ts"] > _PAGE_TOKEN_TTL_SEC or not _page_tokens_cache["tokens"]:
+            _page_tokens_cache["tokens"] = _get_page_tokens()
+            _page_tokens_cache["ts"] = now
+        return _page_tokens_cache["tokens"]
 
 
 def reset_page_token_cache():

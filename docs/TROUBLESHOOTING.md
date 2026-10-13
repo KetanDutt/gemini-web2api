@@ -90,6 +90,22 @@ A 429 from *your* server (not upstream) says `rate_limit_exceeded` and includes
 
 ---
 
+## HTTP 503 `server_busy`
+
+Your server refused the request because `max_concurrent_requests`
+generations were already running. This is backpressure working as
+configured, not an upstream failure — Google was never called, and the
+`server_busy` counter (not `upstream_failures`) records it.
+
+1. Honour `Retry-After` in the client, or spread requests out.
+2. Raise `max_concurrent_requests` if `/status` shows `concurrency`
+   pinned at the limit while upstream latency is healthy — sizing notes
+   are in [CONFIGURATION.md](CONFIGURATION.md#backpressure).
+3. Add accounts (`cookie_files`) if the real ceiling is per-account
+   throttling rather than this process.
+
+---
+
 ## Pro does not behave like Pro
 
 **Symptom:** `gemini-3.1-pro` gives Flash-quality answers.

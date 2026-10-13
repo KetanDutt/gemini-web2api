@@ -23,6 +23,8 @@
   "max_image_bytes": 20971520,
   "rate_limit_max": 0,
   "rate_limit_window_sec": 60,
+  "max_concurrent_requests": 0,
+  "trust_proxy_headers": false,
   "cors_origin": "*",
   "shutdown_timeout_sec": 5,
   "history_max": 200

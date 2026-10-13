@@ -38,14 +38,16 @@ browser extension refresh your session without you editing config by hand.
 
 From the environment, `api_keys` accepts a comma list (`a,b,c`), a pipe list
 (`a|b|c`, matching the Cloudflare Worker convention) or a JSON array
-(`["a","b"]`). An empty string disables auth.
+(`["a","b"]`). An empty string disables auth. The same three forms work for
+`cookie_files` (`GEMINI_WEB2API_COOKIE_FILES`), which names the extra
+accounts to rotate across.
 
 ### Google session
 
 | Key | Default | Environment | CLI | Description |
 |---|---|---|---|---|
 | `cookie_file` | `null` | `GEMINI_WEB2API_COOKIE_FILE` | `--cookie-file` | Path to a cookie file, `gemini-auth.json`, or a Netscape cookie jar. |
-| `cookie_files` | `[]` | `GEMINI_WEB2API_COOKIE_FILES` | — | **Additional** accounts to rotate through when the primary one is rate limited. See [Multiple accounts](#multiple-accounts). |
+| `cookie_files` | `[]` | `GEMINI_WEB2API_COOKIE_FILES` | `--cookie-files` (repeatable) | **Additional** accounts to rotate through when the primary one is rate limited. See [Multiple accounts](#multiple-accounts). |
 | `cookie_cooldown_sec` | `60` | `GEMINI_WEB2API_COOKIE_COOLDOWN_SEC` | — | How long a rate-limited account sits out before it is tried again. A rejected one (`401`/`403`) always waits longer. |
 | `auth_user` | `null` | `GEMINI_WEB2API_AUTH_USER` | — | Google account index for `/u/<n>/` URLs. |
 | `xsrf_token` | `null` | `GEMINI_WEB2API_XSRF_TOKEN` | — | Sent as the `at` form field. Required for authenticated requests. |
@@ -58,7 +60,7 @@ From the environment, `api_keys` accepts a comma list (`a,b,c`), a pipe list
 | Key | Default | Environment | CLI | Description |
 |---|---|---|---|---|
 | `retry_attempts` | `3` | `GEMINI_WEB2API_RETRY_ATTEMPTS` | — | Total attempts per request. Clamped to ≥ 1. |
-| `retry_delay_sec` | `2` | `GEMINI_WEB2API_RETRY_DELAY_SEC` | — | Delay between attempts. |
+| `retry_delay_sec` | `2` | `GEMINI_WEB2API_RETRY_DELAY_SEC` | — | Cap on the exponential backoff between attempts (0.25 s, 0.5 s, 1 s, … up to this value). Transport failures retry immediately regardless. |
 | `request_timeout_sec` | `180` | `GEMINI_WEB2API_REQUEST_TIMEOUT_SEC` | — | Upstream timeout. Thinking models can take a while. |
 | `connect_timeout_sec` | `10` | `GEMINI_WEB2API_CONNECT_TIMEOUT_SEC` | — | Timeout for the upstream TCP+TLS handshake, separate from the read timeout. A stalled connect used to consume the full `request_timeout_sec` before the attempt could be retried. Clamped to at most `request_timeout_sec`. |
 | `proxy` | `null` | `GEMINI_WEB2API_PROXY` | `--proxy` | HTTP proxy. Falls back to `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`. |
@@ -82,6 +84,29 @@ with `gpt-4` or `claude-3-5-sonnet` during setup, and a hard 400 breaks their
 |---|---|---|---|---|
 | `rate_limit_max` | `0` | `GEMINI_WEB2API_RATE_LIMIT_MAX` | `--rate-limit` | Requests per window per key (or per IP when unauthenticated). `0` disables. |
 | `rate_limit_window_sec` | `60` | `GEMINI_WEB2API_RATE_LIMIT_WINDOW_SEC` | `--rate-limit-window` | Window length. |
+| `max_concurrent_requests` | `0` | `GEMINI_WEB2API_MAX_CONCURRENT_REQUESTS` | `--max-concurrent` | Max simultaneous upstream generations. Extra requests fail fast with `503 server_busy` and `Retry-After` instead of queueing. `0` disables. See [Backpressure](#backpressure). |
+| `trust_proxy_headers` | `false` | `GEMINI_WEB2API_TRUST_PROXY_HEADERS` | `--trust-proxy-headers` | Take the client address (rate-limit key, history) from `X-Forwarded-For`. Enable **only** behind a reverse proxy you control — the header is spoofable, which is why it is ignored by default. |
+
+### Backpressure
+
+Rate limiting bounds how *often* a client may ask; `max_concurrent_requests`
+bounds how much work may be *in flight at once*. The distinction matters
+because one generation holds a handler thread for seconds to tens of seconds:
+with no bound, a burst of clients becomes a burst of threads all waiting on
+Google, and the process degrades exactly when it is busiest.
+
+When the limit is reached, the extra request is refused immediately with
+`503`, OpenAI-shaped error code `server_busy`, and `Retry-After: 5` — for
+streaming requests too, because the slot is taken before the SSE headers go
+out. Refusals are counted separately (`server_busy` in `/status` and
+Prometheus, never as upstream failures: the upstream was not called), and
+`/status` reports live capacity as `concurrency: {in_flight, max}`, which the
+dashboard shows on the Status tab.
+
+A sane starting point is roughly the number of Google accounts you rotate
+across multiplied by the concurrency one account tolerates — the pool, not
+the process, is the real ceiling. Leave it at `0` (unlimited) for trusted
+single-client use.
 
 ### Logging
 
