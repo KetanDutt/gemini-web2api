@@ -961,7 +961,7 @@ class RequestHistoryTests(ServerTestCase):
         code reported 0.6ms. The test was wrong to assume otherwise, so it waits.
 
         Bounded, so a genuine failure to record still fails here rather than
-        hanging until the CI timeout.
+        hanging until the test runner timeout.
         """
         deadline = time.monotonic() + timeout
         entries = self._history()

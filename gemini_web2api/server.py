@@ -340,6 +340,17 @@ class GeminiHandler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         client_ip = self.client_address[0] if self.client_address else "-"
+        # Google-native clients may authenticate with ?key=...; BaseHTTPRequestHandler
+        # includes the raw request target in its access-log arguments, so redact the
+        # entire query before even debug logs can persist that credential.
+        request_target = getattr(self, "path", "")
+        if "?" in request_target:
+            safe_target = request_target.split("?", 1)[0]
+            args = tuple(
+                value.replace(request_target, safe_target)
+                if isinstance(value, str) else value
+                for value in args
+            )
         log(f"{self.request_id} {client_ip} {fmt % args}", "debug")
 
     def _split_path(self):

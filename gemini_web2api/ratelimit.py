@@ -26,7 +26,7 @@ class RateLimiter:
         self._windows = {}
         self._max = int(max_requests or 0)
         self._window = float(window_sec or 60)
-        self._last_sweep = time.time()
+        self._last_sweep = time.monotonic()
 
     def configure(self, max_requests, window_sec):
         """Update limits at runtime (config reload)."""
@@ -53,7 +53,10 @@ class RateLimiter:
         with self._lock:
             if self._max <= 0:
                 return True, 0, None, None
-            now = time.time()
+            # Rate windows measure elapsed time, not calendar time. A wall-clock
+            # correction must not let a client reset its bucket early (or keep
+            # it blocked for longer than the configured window).
+            now = time.monotonic()
             if now - self._last_sweep > self._SWEEP_INTERVAL_SEC or len(self._windows) > self._MAX_KEYS:
                 self._sweep(now)
                 self._last_sweep = now

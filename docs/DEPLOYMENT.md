@@ -128,6 +128,11 @@ docker run -d --name gemini-web2api -p 8081:8081 \
   ghcr.io/ketandutt/gemini-web2api:latest
 ```
 
+GHCR images are a manual publishing convenience: this project does not
+automatically build or publish container images. If a published tag is
+unavailable or you need a custom image, run `docker build -t gemini-web2api .`
+from the Build and run instructions above.
+
 ### Image properties
 
 * `python:3.12-slim` base.

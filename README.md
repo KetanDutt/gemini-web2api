@@ -73,7 +73,7 @@ Studio, ChatBox, NextChat, LobeChat, the OpenAI SDK, Codex CLI, Gemini CLI.
   limits and history on the real client from `X-Forwarded-For` (off by
   default, because the header is spoofable without a proxy in front)
 - **Production-ready packaging** — non-root Docker image, healthchecks,
-  environment configuration, graceful shutdown, CI
+  environment configuration and graceful shutdown
 - **One-click Windows setup** — double-click `start.bat` to create a venv,
   install dependencies, write a safe `config.json` and launch
 - **Zero required dependencies** — Python 3.8+, `httpx` optional
@@ -98,7 +98,7 @@ Options: `--onefile` for a single `.exe`, `--clean` to rebuild from scratch,
 `--dry-run` to print the plan without building. The executable runs from its own
 folder, writes a localhost-only `config.json` on first run and opens the
 dashboard; pass `--no-browser` to skip the browser. PyInstaller cannot
-cross-compile, so build on Windows (CI builds it on `windows-latest`).
+cross-compile, so build the executable on Windows.
 
 **macOS / Linux**
 
@@ -133,6 +133,9 @@ docker run -d --name gemini-web2api -p 8081:8081 \
   -e GEMINI_WEB2API_API_KEYS="sk-your-key" \
   ghcr.io/ketandutt/gemini-web2api:latest
 ```
+
+The GHCR image may be used when available; this project does not automatically
+build or publish container images.
 
 ### Docker Compose
 
@@ -418,7 +421,7 @@ history entry, so a browser request can be traced to its log line.
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model and what is protected by default |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Symptom → cause → fix |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Layout, tests, adding a model, release checklist |
-| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | How to contribute, what CI enforces, project invariants |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | How to contribute, manual validation, the no-CI policy and project invariants |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | Version history |
 | [docs/AUDIT.md](docs/AUDIT.md) | The 1.2.0 defect audit, with reproductions |
 
@@ -464,12 +467,16 @@ Details, including the payload slot map and the image upload flow:
 ```bash
 pip install -e ".[dev]"
 python -m unittest discover -s tests -t .
-ruff check gemini_web2api tests
+ruff check gemini_web2api.py gemini_web2api tests scripts
 ```
 
 756 tests, all offline — the Gemini wire protocol is faked at the frame level.
-CI covers Python 3.8–3.13, a stdlib-only run with no third-party packages, a
-build-and-install-the-wheel check, lint and a Docker build.
+Run the checks manually before proposing a change. This project intentionally
+has no GitHub Actions workflows or automated CI; **do not add workflows or CI
+to this project in the future**. No tests, builds or image publishing run
+automatically on pushes or pull requests. See
+[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md#no-automated-ci--project-policy)
+for the required local checks.
 
 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**
 
@@ -499,7 +506,7 @@ allocate. Read the
 [divergence table](cloudflare/README.MD#-与-python-版本的差异) before choosing.
 
 Version numbers are independent sequences: the Worker is
-`1.6.2-cf-multifingerprint`, this package is `1.2.0`.
+`1.6.2-cf-multifingerprint`, this package is `1.3.0`.
 
 ## Acknowledgments
 

@@ -1,9 +1,9 @@
 """The Windows application: build script, launcher and first-run behaviour.
 
-PyInstaller cannot run on the Linux CI runners, so these tests check the parts
-that are decidable without it: the command the build would run, the artifact
-layout, the platform guard, the launcher's file handling, and the server hook
-it depends on. A separate CI job builds the real executable on windows-latest.
+PyInstaller output is platform-specific, so build the real executable on
+Windows with `python scripts/build_windows.py --clean`. These tests cover the
+parts that are decidable on any host: the planned command, artifact layout,
+platform guard, launcher's file handling and the server hook it depends on.
 """
 import contextlib
 import importlib.util
@@ -32,10 +32,9 @@ bw = _load_build_script()
 
 from gemini_web2api import __version__, windows  # noqa: E402
 
-# Repository metadata (.github, .gitattributes, .gitignore) is absent from an
-# sdist. These guards skip there and still run inside a git checkout.
+# Repository metadata (.gitattributes, .gitignore) is absent from an sdist.
+# These guards skip there and still run inside a git checkout.
 from .test_packaging import (  # noqa: E402
-    HAS_CI_WORKFLOW,
     HAS_GITATTRIBUTES,
     HAS_GITIGNORE,
     NO_REPO_METADATA,
@@ -388,19 +387,6 @@ class ServerReadyHookTests(unittest.TestCase):
             result = server_main.main(["--port", "9321"], on_ready=seen.append)
         self.assertEqual(1, result)
         self.assertEqual([], seen)
-
-
-class WorkflowTests(unittest.TestCase):
-    def test_ci_builds_the_windows_executable_on_a_windows_runner(self):
-        if not HAS_CI_WORKFLOW:
-            self.skipTest(NO_REPO_METADATA)
-        path = os.path.join(REPO_ROOT, ".github", "workflows", "ci.yml")
-        with open(path, encoding="utf-8") as handle:
-            text = handle.read()
-        self.assertIn("build-windows:", text)
-        self.assertIn("runs-on: windows-latest", text)
-        self.assertIn("scripts/build_windows.py", text)
-        self.assertIn("--version", text)
 
 
 if __name__ == "__main__":

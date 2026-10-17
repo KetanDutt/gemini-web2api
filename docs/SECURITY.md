@@ -107,9 +107,10 @@ becoming a 500.
 Off by default (`rate_limit_max: 0`), because enabling it silently would break
 existing deployments. When on, it is a fixed-window counter per key (or per IP),
 which is O(1) in memory regardless of traffic — a sliding-window log would grow
-without bound. Expired keys are swept every 30 s and whenever the table exceeds
-10 000 entries, so a long-lived process does not accumulate state for clients
-that never return.
+without bound. Windows use a monotonic clock so wall-clock corrections cannot
+reset or prolong a limit. Expired keys are swept every 30 s and whenever the
+table exceeds 10 000 entries, so a long-lived process does not accumulate state
+for clients that never return.
 
 A limited response is a 429 with `Retry-After` (seconds) plus the
 `X-RateLimit-Limit-Requests` / `X-RateLimit-Remaining-Requests` /
@@ -138,6 +139,8 @@ requests, which never pass through the application's own send helpers.
   `xsrf_token` becomes `"set"`. No endpoint ever returns a cookie value.
 * `/status` requires an API key when keys are configured.
 * Error responses never echo the presented key.
+* HTTP access logs remove the entire query string before emission, including in
+  debug mode, because Google-native clients may pass `?key=<api_key>` there.
 * Logs record prompt length, not prompt content.
 * The dashboard injects the same redacted state and is served with
   `Cache-Control: no-store`.

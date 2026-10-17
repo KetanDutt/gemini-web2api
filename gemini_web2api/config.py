@@ -65,7 +65,7 @@ DEFAULT_CONFIG = {
     "max_request_bytes": 25 * 1024 * 1024,
     # Hard cap on a single fetched remote image, in bytes (20 MiB).
     "max_image_bytes": 20 * 1024 * 1024,
-    # Sliding-window rate limit. 0 disables it.
+    # Fixed-window rate limit. 0 disables it.
     "rate_limit_max": 0,
     "rate_limit_window_sec": 60,
     # Backpressure: how many upstream generations may run at once. 0 means
@@ -167,12 +167,17 @@ def _apply_mapping(mapping, source, mark_explicit=True):
 
 
 def load_config(path=None):
-    """Load config from a JSON file, then apply environment overrides.
+    """Load config from defaults, then apply file and environment overrides.
 
-    Returns the live :data:`CONFIG` dict. Missing files are not an error: the
-    defaults are usable on their own.
+    Every call starts from a clean copy of the defaults so reloading a missing
+    or smaller config file cannot retain values or explicit-key markers from a
+    previous load. Returns the live :data:`CONFIG` dict. Missing files are not
+    an error: the defaults are usable on their own.
     """
     with _lock:
+        CONFIG.clear()
+        CONFIG.update(copy.deepcopy(DEFAULT_CONFIG))
+        _explicit.clear()
         _last_load["warnings"] = []
         _last_load["path"] = None
 

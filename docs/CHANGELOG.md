@@ -11,6 +11,29 @@ was reproduced.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Configuration reloads no longer inherit stale values.** Each `load_config()`
+  now starts from a fresh copy of defaults and clears old explicit-key markers
+  before applying the selected file and environment, so a smaller or missing
+  second config cannot keep credentials or options from an earlier load.
+- **Query-string API keys no longer reach debug access logs.** Google-native
+  clients can still authenticate with `?key=...`, but the request target is
+  redacted before the standard HTTP logger formats it; request history was
+  already query-free.
+- **A standalone compatibility shim no longer hides an installed package.**
+  Because `gemini_web2api.py` shares the package name, a copy outside the source
+  tree used to import itself instead of the wheel. The shim now prefers the
+  sibling source package or, when absent, resolves the installed package.
+- Hardened the keep-alive accounting regression test to wait for the server's
+  post-write counter update instead of racing the client response against the
+  request thread scheduler.
+- **Rate-limit windows survive system-clock corrections.** The limiter now uses
+  monotonic elapsed time for bucket expiry and cleanup, so an NTP or manual clock
+  jump cannot reset a bucket early or extend it unexpectedly.
+- Corrected stale documentation that called the Python limiter sliding-window
+  and updated the READMEs to the current package version and test count.
+
 ### Added
 
 - **A Windows application build.** `build_windows.bat` (or
@@ -18,8 +41,8 @@ was reproduced.
   `dist\windows\gemini-web2api\gemini-web2api.exe` with PyInstaller, smoke-tests
   it with `--version` and writes a portable zip. `--onefile`, `--clean` and
   `--dry-run` are supported. Build tools live in `.venv-build`, so the runtime
-  environment is untouched. CI builds the executable on `windows-latest`, starts
-  it and checks `/health`.
+  environment is untouched. The executable can be built and health-checked
+  locally on Windows; this project does not automate Windows builds.
 - **The executable is a launcher, not just a binary.** `gemini_web2api.windows`
   runs from the executable's folder, writes a localhost-only `config.json` on the
   first run, and opens the dashboard once the port is bound (`--no-browser`
@@ -43,12 +66,13 @@ was reproduced.
   `X-Forwarded-For` address instead of the proxy's. Off by default because
   the header is spoofable without a proxy in front. `--trust-proxy-headers`
   on the CLI.
-- **CI is back.** `.github/workflows/ci.yml` (test matrix 3.8–3.13, a
-  stdlib-only job, package build with the suite re-run from the extracted
-  sdist, lint, Docker build, Windows executable build) and
-  `.github/workflows/docker.yml` (multi-arch GHCR publish) are restored,
-  so the guards that assert CI's shape pass again instead of erroring on
-  a missing file.
+
+### Removed
+
+- Removed `.github/workflows/ci.yml` and `.github/workflows/docker.yml`.
+  The project intentionally has no GitHub workflows or automated CI; the
+  contributor guide now states that neither should be added in the future and
+  documents manual validation instead.
 
 ### Performance
 

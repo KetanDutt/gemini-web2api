@@ -103,6 +103,20 @@ class FileLoadingTests(ConfigTestCase):
         self.assertTrue(is_explicit("gemini_bl"))
         self.assertFalse(is_explicit("xsrf_token"))
 
+    def test_reloading_config_does_not_retain_old_values_or_explicit_keys(self):
+        from gemini_web2api.config import is_explicit
+
+        first = self.write({"port": 9001, "gemini_bl": "pinned_bl"}, "first.json")
+        second = self.write({"port": 9002}, "second.json")
+        with mock.patch.dict(os.environ, {}, clear=True):
+            load_config(first)
+            self.assertTrue(is_explicit("gemini_bl"))
+            load_config(second)
+
+        self.assertEqual(self.CONFIG["port"], 9002)
+        self.assertEqual(self.CONFIG["gemini_bl"], DEFAULT_CONFIG["gemini_bl"])
+        self.assertFalse(is_explicit("gemini_bl"))
+
 
 class EnvironmentTests(ConfigTestCase):
     def test_environment_overrides_file(self):

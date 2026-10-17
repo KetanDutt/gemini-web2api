@@ -2,8 +2,8 @@
 
 These assert the *mechanisms* (fewer frames parsed, byte-identical encoding,
 parallel uploads, negotiated compression), never wall-clock timings — a
-timing assertion would be flaky on a loaded CI box, while a broken mechanism
-is exactly the regression worth catching.
+timing assertion would be flaky on a heavily loaded machine, while a broken
+mechanism is exactly the regression worth catching.
 """
 import gzip
 import http.client
