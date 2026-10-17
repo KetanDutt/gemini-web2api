@@ -51,9 +51,9 @@ _DASHBOARD_HTML = r"""<!doctype html>
 <title>gemini-web2api</title>
 <meta name="description" content="gemini-web2api console — chat, accounts and request activity for the Gemini Web → OpenAI-compatible API gateway.">
 <meta name="robots" content="noindex">
-<meta name="theme-color" content="#eef0f5" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0a0c11" media="(prefers-color-scheme: dark)">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%234a63e7'/%3E%3Cstop offset='1' stop-color='%237f92ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath fill='url(%23g)' d='M16 2C17 10.2 21.8 15 30 16C21.8 17 17 21.8 16 30C15 21.8 10.2 17 2 16C10.2 15 15 10.2 16 2Z'/%3E%3C/svg%3E">
+<meta name="theme-color" content="#f2f4f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#080a0e" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2391c5ff'/%3E%3Cstop offset='1' stop-color='%23b9adff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath fill='url(%23g)' d='M16 2C17 10.2 21.8 15 30 16C21.8 17 17 21.8 16 30C15 21.8 10.2 17 2 16C10.2 15 15 10.2 16 2Z'/%3E%3C/svg%3E">
 <style>
 /* ═══════════════════════════════════════════════════════════════════════════
    gemini-web2api console — Liquid Glass design system (v3)
@@ -82,73 +82,73 @@ _DASHBOARD_HTML = r"""<!doctype html>
   color-scheme:light;
 
   /* Ink. Text is never translucent; only surfaces are. */
-  --bg:#f3f4f7;
-  --bg-top:#fafbfc;
-  --bg-bottom:#eceef3;
-  --fg:#16181f;
-  --fg-2:#5d626d;
-  --fg-3:#5f6470;
-  /* Text accents are a half-step deeper than the fills so small labels clear
-     4.5:1 on the tinted canvas; the fills carry the brighter GlassGem shades. */
-  --accent:#3a52d4;
-  --accent-fill:#4a63e7;
-  --accent-hover:#4058d9;
+  --bg:#f2f4f7;
+  --bg-top:#ffffff;
+  --bg-bottom:#e9edf2;
+  --fg:#171a20;
+  --fg-2:#59616d;
+  --fg-3:#646c78;
+  /* Text accents are deep enough to clear 4.5:1 on the light canvas; the
+     saturated fills carry the brighter blue without sacrificing legibility. */
+  --accent:#1267ca;
+  --accent-fill:#0c61c6;
+  --accent-hover:#0a57b5;
   --accent-fg:#ffffff;
-  --accent-soft:rgba(74,99,231,.10);
-  --ok:#17704a;  --ok-fill:#2f9e63;
+  --accent-soft:rgba(20,107,207,.075);
+  --ok:#1b754d;  --ok-fill:#23845a;
   --warn:#855600; --warn-fill:#c98a1e;
   --bad:#b5262f; --bad-fill:#d9434b;
   --info:#1d6896;
 
   /* Materials — one system, six strengths. Elevation picks the strength. */
-  --glass-1:rgba(255,255,255,.58);   /* inset tiles, cards, list surfaces   */
-  --glass-2:rgba(255,255,255,.72);   /* panels, transcript, tables          */
-  --glass-3:rgba(255,255,255,.78);   /* chrome: topbar, rail, sticky heads  */
-  --glass-4:rgba(255,255,255,.88);   /* popovers, menus, tooltips           */
+  --glass-1:rgba(255,255,255,.48);   /* inset tiles, cards, list surfaces   */
+  --glass-2:rgba(255,255,255,.58);   /* panels, transcript, tables          */
+  --glass-3:rgba(250,251,253,.74);   /* chrome: topbar, rail, sticky heads  */
+  --glass-4:rgba(252,253,255,.86);   /* popovers, menus, tooltips           */
   --glass-5:rgba(255,255,255,.94);   /* dialogs and sheets                  */
   --glass-6:rgba(255,255,255,.97);   /* toasts, highest layer               */
   --pane:rgba(255,255,255,0);        /* workspace floats on the ambient bg  */
-  --pane-stuck:rgba(255,255,255,.72);
-  --fill-1:rgba(22,24,31,.045);      /* quiet fills: hover, rails, meters   */
-  --fill-2:rgba(22,24,31,.080);
-  --fill-3:rgba(22,24,31,.130);
+  --pane-stuck:rgba(250,251,253,.74);
+  --fill-1:rgba(19,27,40,.045);      /* quiet fills: hover, rails, meters   */
+  --fill-2:rgba(19,27,40,.080);
+  --fill-3:rgba(19,27,40,.130);
   --field:rgba(255,255,255,.68);     /* input wells                         */
   --field-hover:rgba(255,255,255,.82);
   --field-focus:rgba(255,255,255,.96);
-  --code-bg:rgba(22,24,31,.050);
-  --scrim:rgba(20,22,30,.28);
-  --surface-solid:247,248,251;      /* rgb triplet: opaque fallback surface  */
+  --code-bg:rgba(19,27,40,.050);
+  --scrim:rgba(34,40,50,.34);
+  --surface-solid:255,255,255;      /* rgb triplet: opaque fallback surface  */
 
   /* Hairlines and edge light. A border defines; it never decorates. */
-  --line-1:rgba(22,24,31,.075);
-  --line-2:rgba(22,24,31,.130);
-  --line-3:rgba(22,24,31,.220);
-  --edge-hi:rgba(255,255,255,.88);
-  --edge-lo:rgba(255,255,255,.18);
-  --edge-hi-strong:rgba(255,255,255,.22);  /* highlight on a tinted fill */
+  --line-1:rgba(19,27,40,.085);
+  --line-2:rgba(19,27,40,.150);
+  --line-3:rgba(19,27,40,.220);
+  --edge-hi:rgba(255,255,255,.92);
+  --edge-lo:rgba(19,27,40,.055);
+  --edge-hi-strong:rgba(255,255,255,.88);  /* highlight on a tinted fill */
   --sheen:rgba(255,255,255,.30);            /* pointer light, specular    */
   --sheen-fade:rgba(255,255,255,0);
   --fill-on-tint:rgba(255,255,255,.16);     /* chips sitting on a tint    */
   --on-accent:#ffffff;                      /* content on an accent fill  */
 
   /* Tints — opaque text on tinted glass. */
-  --acc-bg:rgba(74,99,231,.10);   --acc-line:rgba(74,99,231,.28);   --acc-ring:rgba(74,99,231,.30);
-  --ok-bg:rgba(47,158,99,.11);    --ok-line:rgba(47,158,99,.28);
+  --acc-bg:rgba(20,107,207,.075);   --acc-line:rgba(20,107,207,.24);   --acc-ring:rgba(20,107,207,.22);
+  --ok-bg:rgba(35,132,90,.10);    --ok-line:rgba(35,132,90,.24);
   --warn-bg:rgba(201,138,30,.13); --warn-line:rgba(201,138,30,.32);
   --bad-bg:rgba(217,67,75,.10);   --bad-line:rgba(217,67,75,.28);
-  --neu-bg:rgba(67,76,96,.09);    --neu-line:rgba(67,76,96,.20);
+  --neu-bg:rgba(19,27,40,.060);    --neu-line:rgba(19,27,40,.16);
 
   /* Ambient colour behind the glass: three soft fields on the canvas. */
-  --tint-a:rgba(91,108,204,.075);
-  --tint-b:rgba(151,119,205,.055);
-  --tint-c:rgba(93,164,214,.050);
+  --tint-a:rgba(76,141,213,.13);
+  --tint-b:rgba(129,106,196,.09);
+  --tint-c:rgba(83,149,190,.08);
 
   /* Depth — ambient, never dramatic. */
-  --sh-1:0 1px 1px rgba(20,24,40,.03), 0 2px 8px -2px rgba(20,24,40,.05);
-  --sh-2:0 1px 1px rgba(20,24,40,.03), 0 12px 32px -16px rgba(20,24,40,.13);
-  --sh-3:0 1px 2px rgba(20,24,40,.03), 0 24px 56px -24px rgba(20,24,40,.20);
-  --sh-4:0 1px 2px rgba(20,24,40,.04), 0 36px 80px -32px rgba(20,24,40,.28);
-  --sh-5:0 2px 4px rgba(20,24,40,.05), 0 44px 96px -32px rgba(20,24,40,.34);
+  --sh-1:0 8px 25px -18px rgba(33,42,56,.26);
+  --sh-2:0 20px 54px -32px rgba(33,42,56,.32), 0 1px 2px rgba(33,42,56,.05);
+  --sh-3:0 36px 90px -42px rgba(33,42,56,.38), 0 2px 4px rgba(33,42,56,.06);
+  --sh-4:0 42px 100px -42px rgba(33,42,56,.40), 0 2px 5px rgba(33,42,56,.07);
+  --sh-5:0 48px 110px -44px rgba(33,42,56,.44), 0 3px 6px rgba(33,42,56,.08);
   --sh-inset:inset 0 1px 0 var(--edge-hi);
   --sh-lift-1:0 1px 1.5px rgba(20,24,40,.10);
   --sh-lift-2:0 2px 5px rgba(20,24,40,.12);
@@ -158,31 +158,31 @@ _DASHBOARD_HTML = r"""<!doctype html>
   --sh-press:inset 0 1.5px 3px rgba(20,24,40,.10);
 
   /* Blur and saturation */
-  --blur-1:10px; --blur-2:16px; --blur-3:26px; --blur-4:36px; --blur-5:48px;
-  --blur-veil:9px;
-  --sat-1:135%; --sat-2:150%; --sat-3:160%;
+  --blur-1:12px; --blur-2:22px; --blur-3:36px; --blur-4:44px; --blur-5:54px;
+  --blur-veil:36px;
+  --sat-1:135%; --sat-2:145%; --sat-3:155%;
 
   /* Radii */
-  --r-1:8px; --r-2:12px; --r-3:16px; --r-4:20px; --r-5:26px; --r-6:32px;
+  --r-1:10px; --r-2:14px; --r-3:20px; --r-4:28px; --r-5:36px; --r-6:36px;
   --r-full:999px;
 
   /* Space */
   --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px;
-  --sp-7:32px; --sp-8:44px; --sp-9:60px; --sp-10:80px;
+  --sp-7:32px; --sp-8:40px; --sp-9:48px; --sp-10:64px;
 
   /* Type */
-  --fs-micro:11px; --fs-meta:12.5px; --fs-sm:13.5px; --fs-body:15px;
-  --fs-lead:17px; --fs-h3:19px; --fs-h2:24px; --fs-h1:clamp(30px,2.9vw,40px);
-  --track-tight:-.022em; --track-wide:.085em;
+  --fs-micro:11px; --fs-meta:12.5px; --fs-sm:13.5px; --fs-body:16px;
+  --fs-lead:17px; --fs-h3:19px; --fs-h2:24px; --fs-h1:clamp(32px,3vw,42px);
+  --track-tight:-.035em; --track-wide:.10em;
   --lh-tight:1.2; --lh-body:1.62;
 
   /* Motion — fast in response, smooth in motion. */
-  --d-1:130ms; --d-2:190ms; --d-3:260ms; --d-4:380ms; --d-5:520ms;
-  --e-out:cubic-bezier(.22,.61,.21,1);
-  --e-inout:cubic-bezier(.4,0,.2,1);
-  --e-spring:cubic-bezier(.34,1.3,.42,1);
-  --e-enter:cubic-bezier(.16,.84,.3,1);
-  --e-glide:cubic-bezier(.26,.94,.34,1);
+  --d-1:160ms; --d-2:220ms; --d-3:280ms; --d-4:400ms; --d-5:520ms;
+  --e-out:cubic-bezier(.22,1,.36,1);
+  --e-inout:cubic-bezier(.16,1,.3,1);
+  --e-spring:cubic-bezier(.2,.8,.2,1);
+  --e-enter:cubic-bezier(.16,1,.3,1);
+  --e-glide:cubic-bezier(.22,1,.36,1);
 
   /* Layers */
   --z-canvas:-1; --z-pane:1; --z-panel:2; --z-chrome:30; --z-pop:40;
@@ -193,65 +193,66 @@ _DASHBOARD_HTML = r"""<!doctype html>
   --mono:ui-monospace,"SF Mono",SFMono-Regular,"JetBrains Mono",Menlo,Consolas,monospace;
 
   --rail:236px;              /* navigation rail width, desktop          */
-  --pane-max:1180px;         /* readable measure inside the workspace   */
+  --pane-max:1200px;         /* readable measure inside the workspace   */
 }
 
 /* Palette — dark. A designed scheme, not an inversion: deep neutrals, low
    border contrast, surfaces that stay visible without turning white. */
 :root[data-theme="dark"]{
   color-scheme:dark;
-  --bg:#0a0c11;
-  --bg-top:#10131a;
-  --bg-bottom:#07090d;
-  --fg:#eef0f6; --fg-2:#9aa2b1; --fg-3:#8a92a3;
-  --accent:#7f92ff; --accent-fill:#4a63e7; --accent-hover:#4f66ea; --accent-fg:#ffffff;
-  --accent-soft:rgba(127,146,255,.14);
-  --ok:#55c98a; --ok-fill:#55c98a;
+  --bg:#080a0e;
+  --bg-top:#0d1016;
+  --bg-bottom:#080a0e;
+  --fg:#f6f7f9; --fg-2:#a8afbb; --fg-3:#77808f;
+  --accent:#91c5ff; --accent-fill:#78b5f5; --accent-hover:#68a9f4; --accent-fg:#07111d;
+  --accent-soft:rgba(145,197,255,.105);
+  --ok:#73d9a4; --ok-fill:#73d9a4;
   --warn:#e2b25a; --warn-fill:#e2b25a;
-  --bad:#f0676d; --bad-fill:#f0676d;
-  --info:#7fc8ef;
+  --bad:#e49393; --bad-fill:#e49393;
+  --info:#91c5ff;
 
-  --glass-1:rgba(255,255,255,.055);
-  --glass-2:rgba(255,255,255,.085);
-  --glass-3:rgba(255,255,255,.110);
-  --glass-4:rgba(22,25,34,.78);
-  --glass-5:rgba(24,27,37,.88);
-  --glass-6:rgba(28,32,43,.94);
+  --glass-1:rgba(255,255,255,.035);
+  --glass-2:rgba(255,255,255,.045);
+  --glass-3:rgba(21,25,34,.68);
+  --glass-4:rgba(22,26,35,.82);
+  --glass-5:rgba(22,26,35,.92);
+  --glass-6:rgba(22,26,35,.96);
   --pane:rgba(255,255,255,0);
-  --pane-stuck:rgba(255,255,255,.065);
+  --pane-stuck:rgba(22,26,35,.68);
   --fill-1:rgba(255,255,255,.045);
-  --fill-2:rgba(255,255,255,.070);
-  --fill-3:rgba(255,255,255,.120);
-  --field:rgba(255,255,255,.050);
-  --field-hover:rgba(255,255,255,.070);
-  --field-focus:rgba(255,255,255,.100);
+  --fill-2:rgba(255,255,255,.075);
+  --fill-3:rgba(255,255,255,.130);
+  --field:rgba(255,255,255,.045);
+  --field-hover:rgba(255,255,255,.075);
+  --field-focus:rgba(255,255,255,.105);
   --code-bg:rgba(0,0,0,.32);
-  --scrim:rgba(4,5,10,.55);
-  --surface-solid:18,20,28;
+  --scrim:rgba(4,6,9,.68);
+  --surface-solid:17,21,28;
 
-  --line-1:rgba(238,240,246,.080);
-  --line-2:rgba(238,240,246,.140);
-  --line-3:rgba(238,240,246,.220);
-  --edge-hi:rgba(255,255,255,.12);
-  --edge-lo:rgba(255,255,255,.040);
+  --line-1:rgba(255,255,255,.090);
+  --line-2:rgba(255,255,255,.160);
+  --line-3:rgba(255,255,255,.220);
+  --edge-hi:rgba(255,255,255,.17);
+  --edge-lo:rgba(255,255,255,.060);
   --edge-hi-strong:rgba(255,255,255,.20);
   --fill-on-tint:rgba(255,255,255,.16);
-  --on-accent:#ffffff;
+  --on-accent:#07111d;
+  --sheen:rgba(196,224,255,.14);
 
-  --acc-bg:rgba(127,146,255,.14); --acc-line:rgba(127,146,255,.32); --acc-ring:rgba(127,146,255,.35);
-  --ok-bg:rgba(85,201,138,.10);   --ok-line:rgba(85,201,138,.30);
+  --acc-bg:rgba(145,197,255,.105); --acc-line:rgba(145,197,255,.24); --acc-ring:rgba(145,197,255,.26);
+  --ok-bg:rgba(115,217,164,.10);   --ok-line:rgba(115,217,164,.30);
   --warn-bg:rgba(226,178,90,.12); --warn-line:rgba(226,178,90,.30);
-  --bad-bg:rgba(240,103,109,.10); --bad-line:rgba(240,103,109,.30);
-  --neu-bg:rgba(238,240,246,.08);  --neu-line:rgba(238,240,246,.16);
-  --tint-a:rgba(90,110,220,.070);
-  --tint-b:rgba(150,110,220,.050);
-  --tint-c:rgba(80,170,230,.045);
+  --bad-bg:rgba(228,147,147,.105); --bad-line:rgba(228,147,147,.30);
+  --neu-bg:rgba(246,247,249,.060);  --neu-line:rgba(246,247,249,.16);
+  --tint-a:rgba(83,142,209,.12);
+  --tint-b:rgba(130,108,201,.09);
+  --tint-c:rgba(58,126,176,.07);
 
-  --sh-1:0 1px 1px rgba(0,0,0,.18), 0 2px 8px -2px rgba(0,0,0,.22);
-  --sh-2:0 1px 1px rgba(0,0,0,.18), 0 12px 32px -16px rgba(0,0,0,.48);
-  --sh-3:0 1px 2px rgba(0,0,0,.22), 0 24px 56px -24px rgba(0,0,0,.58);
-  --sh-4:0 1px 2px rgba(0,0,0,.26), 0 36px 80px -32px rgba(0,0,0,.68);
-  --sh-5:0 2px 4px rgba(0,0,0,.30), 0 44px 96px -32px rgba(0,0,0,.74);
+  --sh-1:0 8px 24px -18px rgba(0,0,0,.72);
+  --sh-2:0 18px 54px -28px rgba(0,0,0,.78), 0 1px 1px rgba(0,0,0,.22);
+  --sh-3:0 34px 90px -38px rgba(0,0,0,.86), 0 2px 4px rgba(0,0,0,.24);
+  --sh-4:0 42px 100px -40px rgba(0,0,0,.88), 0 2px 5px rgba(0,0,0,.28);
+  --sh-5:0 48px 112px -42px rgba(0,0,0,.90), 0 3px 6px rgba(0,0,0,.30);
   --sh-inset:inset 0 1px 0 var(--edge-hi);
   --sh-lift-1:0 1px 1.5px rgba(0,0,0,.30);
   --sh-lift-2:0 2px 6px rgba(0,0,0,.34);
@@ -262,58 +263,59 @@ _DASHBOARD_HTML = r"""<!doctype html>
 }
 @media (prefers-color-scheme:dark){
 :root:not([data-theme="light"]){  color-scheme:dark;
-  --bg:#0a0c11;
-  --bg-top:#10131a;
-  --bg-bottom:#07090d;
-  --fg:#eef0f6; --fg-2:#9aa2b1; --fg-3:#8a92a3;
-  --accent:#7f92ff; --accent-fill:#4a63e7; --accent-hover:#4f66ea; --accent-fg:#ffffff;
-  --accent-soft:rgba(127,146,255,.14);
-  --ok:#55c98a; --ok-fill:#55c98a;
+  --bg:#080a0e;
+  --bg-top:#0d1016;
+  --bg-bottom:#080a0e;
+  --fg:#f6f7f9; --fg-2:#a8afbb; --fg-3:#77808f;
+  --accent:#91c5ff; --accent-fill:#78b5f5; --accent-hover:#68a9f4; --accent-fg:#07111d;
+  --accent-soft:rgba(145,197,255,.105);
+  --ok:#73d9a4; --ok-fill:#73d9a4;
   --warn:#e2b25a; --warn-fill:#e2b25a;
-  --bad:#f0676d; --bad-fill:#f0676d;
-  --info:#7fc8ef;
+  --bad:#e49393; --bad-fill:#e49393;
+  --info:#91c5ff;
 
-  --glass-1:rgba(255,255,255,.055);
-  --glass-2:rgba(255,255,255,.085);
-  --glass-3:rgba(255,255,255,.110);
-  --glass-4:rgba(22,25,34,.78);
-  --glass-5:rgba(24,27,37,.88);
-  --glass-6:rgba(28,32,43,.94);
+  --glass-1:rgba(255,255,255,.035);
+  --glass-2:rgba(255,255,255,.045);
+  --glass-3:rgba(21,25,34,.68);
+  --glass-4:rgba(22,26,35,.82);
+  --glass-5:rgba(22,26,35,.92);
+  --glass-6:rgba(22,26,35,.96);
   --pane:rgba(255,255,255,0);
-  --pane-stuck:rgba(255,255,255,.065);
+  --pane-stuck:rgba(22,26,35,.68);
   --fill-1:rgba(255,255,255,.045);
-  --fill-2:rgba(255,255,255,.070);
-  --fill-3:rgba(255,255,255,.120);
-  --field:rgba(255,255,255,.050);
-  --field-hover:rgba(255,255,255,.070);
-  --field-focus:rgba(255,255,255,.100);
+  --fill-2:rgba(255,255,255,.075);
+  --fill-3:rgba(255,255,255,.130);
+  --field:rgba(255,255,255,.045);
+  --field-hover:rgba(255,255,255,.075);
+  --field-focus:rgba(255,255,255,.105);
   --code-bg:rgba(0,0,0,.32);
-  --scrim:rgba(4,5,10,.55);
-  --surface-solid:18,20,28;
+  --scrim:rgba(4,6,9,.68);
+  --surface-solid:17,21,28;
 
-  --line-1:rgba(238,240,246,.080);
-  --line-2:rgba(238,240,246,.140);
-  --line-3:rgba(238,240,246,.220);
-  --edge-hi:rgba(255,255,255,.12);
-  --edge-lo:rgba(255,255,255,.040);
+  --line-1:rgba(255,255,255,.090);
+  --line-2:rgba(255,255,255,.160);
+  --line-3:rgba(255,255,255,.220);
+  --edge-hi:rgba(255,255,255,.17);
+  --edge-lo:rgba(255,255,255,.060);
   --edge-hi-strong:rgba(255,255,255,.20);
   --fill-on-tint:rgba(255,255,255,.16);
-  --on-accent:#ffffff;
+  --on-accent:#07111d;
+  --sheen:rgba(196,224,255,.14);
 
-  --acc-bg:rgba(127,146,255,.14); --acc-line:rgba(127,146,255,.32); --acc-ring:rgba(127,146,255,.35);
-  --ok-bg:rgba(85,201,138,.10);   --ok-line:rgba(85,201,138,.30);
+  --acc-bg:rgba(145,197,255,.105); --acc-line:rgba(145,197,255,.24); --acc-ring:rgba(145,197,255,.26);
+  --ok-bg:rgba(115,217,164,.10);   --ok-line:rgba(115,217,164,.30);
   --warn-bg:rgba(226,178,90,.12); --warn-line:rgba(226,178,90,.30);
-  --bad-bg:rgba(240,103,109,.10); --bad-line:rgba(240,103,109,.30);
-  --neu-bg:rgba(238,240,246,.08);  --neu-line:rgba(238,240,246,.16);
-  --tint-a:rgba(90,110,220,.070);
-  --tint-b:rgba(150,110,220,.050);
-  --tint-c:rgba(80,170,230,.045);
+  --bad-bg:rgba(228,147,147,.105); --bad-line:rgba(228,147,147,.30);
+  --neu-bg:rgba(246,247,249,.060);  --neu-line:rgba(246,247,249,.16);
+  --tint-a:rgba(83,142,209,.12);
+  --tint-b:rgba(130,108,201,.09);
+  --tint-c:rgba(58,126,176,.07);
 
-  --sh-1:0 1px 1px rgba(0,0,0,.18), 0 2px 8px -2px rgba(0,0,0,.22);
-  --sh-2:0 1px 1px rgba(0,0,0,.18), 0 12px 32px -16px rgba(0,0,0,.48);
-  --sh-3:0 1px 2px rgba(0,0,0,.22), 0 24px 56px -24px rgba(0,0,0,.58);
-  --sh-4:0 1px 2px rgba(0,0,0,.26), 0 36px 80px -32px rgba(0,0,0,.68);
-  --sh-5:0 2px 4px rgba(0,0,0,.30), 0 44px 96px -32px rgba(0,0,0,.74);
+  --sh-1:0 8px 24px -18px rgba(0,0,0,.72);
+  --sh-2:0 18px 54px -28px rgba(0,0,0,.78), 0 1px 1px rgba(0,0,0,.22);
+  --sh-3:0 34px 90px -38px rgba(0,0,0,.86), 0 2px 4px rgba(0,0,0,.24);
+  --sh-4:0 42px 100px -40px rgba(0,0,0,.88), 0 2px 5px rgba(0,0,0,.28);
+  --sh-5:0 48px 112px -42px rgba(0,0,0,.90), 0 3px 6px rgba(0,0,0,.30);
   --sh-inset:inset 0 1px 0 var(--edge-hi);
   --sh-lift-1:0 1px 1.5px rgba(0,0,0,.30);
   --sh-lift-2:0 2px 6px rgba(0,0,0,.34);
@@ -363,7 +365,7 @@ b,strong{font-weight:640}
 [hidden]{display:none !important}
 
 /* Focus: one ring for the whole product, always visible on keyboard use. */
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:var(--r-1);box-shadow:0 0 0 4px var(--acc-ring)}
 input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
 .skip{
   position:fixed;left:-9999px;top:0;z-index:var(--z-toast);
@@ -390,10 +392,19 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
 .canvas-glow{
   position:absolute;inset:-24% -12% -8%;display:block;
   background:
-    radial-gradient(38% 30% at 62% 22%, rgba(255,255,255,.22), transparent 70%),
-    radial-gradient(34% 26% at 22% 62%, rgba(120,140,220,.07), transparent 72%);
+    radial-gradient(38% 30% at 62% 22%, rgba(76,141,213,.13), transparent 70%),
+    radial-gradient(34% 26% at 22% 62%, rgba(129,106,196,.09), transparent 72%);
   transform:translate3d(0,0,0);
   will-change:transform;
+}
+.canvas::before{
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.25;
+  background-image:
+    linear-gradient(rgba(18,28,44,.03) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(18,28,44,.03) 1px,transparent 1px);
+  background-size:72px 72px;
+  -webkit-mask-image:linear-gradient(to bottom,#000,transparent 58%);
+  mask-image:linear-gradient(to bottom,#000,transparent 58%);
 }
 .canvas::after{ /* fine grain keeps the soft fields from banding */
   content:"";position:absolute;inset:0;opacity:.020;
@@ -401,15 +412,25 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
 }
 :root[data-theme="dark"] .canvas-glow{
   background:
-    radial-gradient(38% 30% at 62% 22%, rgba(140,160,255,.08), transparent 70%),
-    radial-gradient(34% 26% at 22% 62%, rgba(120,140,220,.07), transparent 72%);
+    radial-gradient(38% 30% at 62% 22%, rgba(83,142,209,.12), transparent 70%),
+    radial-gradient(34% 26% at 22% 62%, rgba(130,108,201,.09), transparent 72%);
+}
+:root[data-theme="dark"] .canvas::before{
+  opacity:.32;
+  background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);
 }
 :root[data-theme="dark"] .canvas::after{opacity:.045}
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]) .canvas-glow{
     background:
-      radial-gradient(38% 30% at 62% 22%, rgba(140,160,255,.08), transparent 70%),
-      radial-gradient(34% 26% at 22% 62%, rgba(120,140,220,.07), transparent 72%);
+      radial-gradient(38% 30% at 62% 22%, rgba(83,142,209,.12), transparent 70%),
+      radial-gradient(34% 26% at 22% 62%, rgba(130,108,201,.09), transparent 72%);
+  }
+  :root:not([data-theme="light"]) .canvas::before{
+    opacity:.32;
+    background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);
   }
   :root:not([data-theme="light"]) .canvas::after{opacity:.045}
 }
@@ -488,9 +509,10 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
 .topbar{
   position:relative;z-index:var(--z-chrome);flex:none;
   display:flex;align-items:center;gap:var(--sp-3);min-width:0;
-  padding:8px 10px;border-radius:var(--r-4);
-  background:transparent;border-color:transparent;box-shadow:none;
-  -webkit-backdrop-filter:none;backdrop-filter:none;
+  padding:8px 10px;border-radius:var(--r-full);
+  background:var(--glass-3);border-color:var(--line-1);box-shadow:var(--sh-2),var(--sh-inset);
+  -webkit-backdrop-filter:blur(var(--blur-2)) saturate(var(--sat-2));
+  backdrop-filter:blur(var(--blur-2)) saturate(var(--sat-2));
   transition:padding var(--d-3) var(--e-out),background-color var(--d-3) var(--e-out),
              border-color var(--d-3) var(--e-out),box-shadow var(--d-3) var(--e-out);
 }
@@ -500,7 +522,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
   backdrop-filter:blur(var(--blur-3)) saturate(var(--sat-2));
   box-shadow:var(--sh-3), var(--sh-inset);
 }
-.topbar::before{opacity:0;transition:opacity var(--d-3) var(--e-out)}
+.topbar::before{opacity:.9;transition:opacity var(--d-3) var(--e-out)}
 .topbar.is-scrolled::before{opacity:.9}
 .brand{
   display:flex;align-items:center;gap:11px;min-width:0;
@@ -509,10 +531,11 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
 }
 .brand:hover{text-decoration:none}
 .mark{
-  width:36px;height:36px;flex:0 0 36px;border-radius:var(--r-2);
+  width:36px;height:36px;flex:0 0 36px;border-radius:13px;
   display:grid;place-items:center;position:relative;
-  background:var(--accent-soft);border:1px solid var(--acc-line);
-  box-shadow:var(--sh-1), var(--sh-inset);
+  background:linear-gradient(155deg,#fff,#cfd7e2 70%,#b7c0cd);
+  border:1px solid rgba(255,255,255,.52);
+  box-shadow:inset 0 1px 1px rgba(255,255,255,.8),0 8px 18px -12px rgba(0,0,0,.62);
   transition:transform var(--d-2) var(--e-spring),box-shadow var(--d-2) var(--e-out);
 }
 .mark svg{width:20px;height:20px;display:block}
@@ -603,7 +626,7 @@ nav.tabs{
   padding:2px;border-radius:var(--r-4);
 }
 nav.tabs .glider{
-  position:absolute;left:0;top:0;width:0;height:0;border-radius:var(--r-3);
+  position:absolute;left:0;top:0;width:0;height:0;border-radius:var(--r-full);
   background:var(--accent-soft);border:1px solid var(--acc-line);
   box-shadow:var(--sh-inset);
   opacity:0;pointer-events:none;
@@ -615,7 +638,7 @@ nav.tabs .glider.ready{opacity:1}
 .tab-btn{
   position:relative;z-index:1;display:flex;align-items:center;gap:11px;width:100%;
   appearance:none;background:none;border:0;cursor:pointer;text-align:left;
-  padding:9px 12px;border-radius:var(--r-3);color:var(--fg-2);
+  padding:9px 12px;border-radius:var(--r-full);color:var(--fg-2);
   font-size:var(--fs-sm);font-weight:560;letter-spacing:-.004em;white-space:nowrap;
   transition:color var(--d-2) var(--e-out),transform var(--d-1) var(--e-out),
              background-color var(--d-2) var(--e-out);
@@ -687,7 +710,7 @@ section.tab.active[data-enter="none"]{animation:panelIn var(--d-3) var(--e-enter
 .btn{
   position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;
   appearance:none;cursor:pointer;user-select:none;
-  min-height:38px;padding:0 16px;border-radius:var(--r-2);
+  min-height:40px;padding:0 18px;border-radius:var(--r-full);
   border:1px solid transparent;
   font-size:var(--fs-sm);font-weight:580;letter-spacing:-.004em;white-space:nowrap;
   transition:transform var(--d-1) var(--e-out),box-shadow var(--d-2) var(--e-out),
@@ -747,10 +770,10 @@ section.tab.active[data-enter="none"]{animation:panelIn var(--d-3) var(--e-enter
 .btn--quiet:hover:not(:disabled){background:var(--fill-1);color:var(--fg)}
 .btn--quiet[aria-pressed="true"],.btn--quiet.is-on{background:var(--acc-bg);color:var(--accent);border-color:var(--acc-line)}
 .btn--quiet-danger:hover:not(:disabled){background:var(--bad-bg);color:var(--bad);border-color:transparent}
-.btn--sm{min-height:32px;padding:0 12px;font-size:var(--fs-meta);border-radius:var(--r-2);gap:7px}
+.btn--sm{min-height:34px;padding:0 14px;font-size:var(--fs-meta);border-radius:var(--r-full);gap:7px}
 .btn--sm svg{width:15px;height:15px}
-.btn--icon{width:38px;min-width:38px;padding:0;border-radius:var(--r-2)}
-.btn--icon.btn--sm{width:32px;min-width:32px}
+.btn--icon{width:40px;height:40px;min-width:40px;min-height:40px;padding:0;border-radius:50%}
+.btn--icon.btn--sm{width:36px;height:36px;min-width:36px;min-height:36px}
 .btn kbd{
   font-family:var(--mono);font-size:10px;padding:1px 5px;border-radius:5px;
   background:var(--fill-1);border:1px solid var(--line-1);
@@ -1119,10 +1142,10 @@ button.conv-open{
   font:inherit;font-size:var(--fs-sm);color:inherit;text-align:left;
   flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:var(--r-1);box-shadow:0 0 0 4px var(--acc-ring)}
 
 .thread{
-  border-radius:var(--r-4);overflow:hidden;display:flex;flex-direction:column;
+  border-radius:var(--r-5);overflow:hidden;display:flex;flex-direction:column;
   min-width:0;min-height:0;
   border-color:var(--line-2);box-shadow:var(--sh-2), var(--sh-inset);
 }
@@ -1162,7 +1185,7 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
 .msg.assistant .bub{padding:0 2px}
 /* The user's own words sit on solid accent glass, lit from the top edge, so
    the bubble reads as an object floating over the transcript rather than a
-   tinted label. White on the accent fill holds ~5:1 in both schemes. */
+   tinted label. Ink switches with the palette to keep contrast comfortably AA. */
 .msg.user .bub{
   display:inline-block;max-width:min(100%,72ch);
   background:linear-gradient(180deg,color-mix(in srgb,var(--accent-fill) 88%,#fff),var(--accent-fill));
