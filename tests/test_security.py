@@ -56,6 +56,16 @@ class ApiKeyTests(ServerTestCase):
         status, _headers, _body = self.get_json("/v1/models?key=sk-secret")
         self.assertEqual(status, 200)
 
+    def test_query_key_is_not_written_to_access_logs(self):
+        """Debug access logs must not persist keys accepted in the query."""
+        with mock.patch("gemini_web2api.server.log") as log_output:
+            status, _headers, _body = self.get_json("/v1/models?key=sk-secret")
+
+        self.assertEqual(status, 200)
+        lines = [call.args[0] for call in log_output.call_args_list]
+        self.assertTrue(any("/v1/models" in line for line in lines))
+        self.assertNotIn("sk-secret", "\n".join(lines))
+
     def test_post_endpoints_are_protected(self):
         status, _headers, _body = self.post_json("/v1/chat/completions", CHAT_BODY)
         self.assertEqual(status, 401)
@@ -391,6 +401,12 @@ class RateLimitUnitTests(unittest.TestCase):
         limiter._windows["a"] = (limiter._windows["a"][0] - 61, 1)
         self.assertTrue(limiter.check("a")[0])
 
+    def test_wall_clock_adjustments_do_not_reset_a_rate_window(self):
+        limiter = RateLimiter(1, 60)
+        self.assertTrue(limiter.check("a")[0])
+        with mock.patch("time.time", return_value=10 ** 12):
+            self.assertFalse(limiter.check("a")[0])
+
     def test_reconfigure_at_runtime(self):
         limiter = RateLimiter(0, 60)
         self.assertTrue(limiter.check("a")[0])
@@ -406,7 +422,7 @@ class RateLimitUnitTests(unittest.TestCase):
             limiter.check(f"key-{index}")
         self.assertEqual(limiter.snapshot()["tracked_keys"], 500)
         now = limiter._windows["key-0"][0] + 61
-        with mock.patch("time.time", return_value=now):
+        with mock.patch("gemini_web2api.ratelimit.time.monotonic", return_value=now):
             limiter._last_sweep = 0
             limiter.check("fresh")
         self.assertLess(limiter.snapshot()["tracked_keys"], 10)

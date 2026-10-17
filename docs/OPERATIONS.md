@@ -72,7 +72,8 @@ Off by default (`rate_limit_max: 0`). Enable with e.g.
 `GEMINI_WEB2API_RATE_LIMIT_MAX=120` and `GEMINI_WEB2API_RATE_LIMIT_WINDOW_SEC=60`
 (see [CONFIGURATION.md](CONFIGURATION.md)). The limiter is a fixed-window
 counter per API key (or per client IP when no keys are configured) and is O(1)
-in memory; expired keys are swept every 30 s.
+in memory; its interval accounting uses a monotonic clock, so system-time changes
+do not reset a limit. Expired keys are swept every 30 s.
 
 Clients see:
 

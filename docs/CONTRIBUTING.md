@@ -46,12 +46,13 @@ A PR is green when all of these hold:
 
 | Check | Command |
 |---|---|
-| Tests pass on Python 3.8, 3.11, 3.12, 3.13 | `python -m unittest discover -s tests -t .` |
-| Tests pass with **no third-party packages** | same, in a venv without `httpx` |
-| Lint | `ruff check gemini_web2api tests scripts` |
-| Byte-compile | `python -m compileall -q gemini_web2api tests scripts` |
-| Package builds, installs, and the console script runs | `python -m build` |
-| Docker image builds | `docker build .` |
+| Full suite on every supported Python version (3.8–3.13) | `python -m unittest discover -s tests -t .` |
+| Core suite passes with no third-party packages | same, after removing optional `httpx` |
+| Ruff lint covers the shim, package, tests and scripts | `ruff check gemini_web2api.py gemini_web2api tests scripts` |
+| Byte-compile covers every Python directory | `python -m compileall -q gemini_web2api.py gemini_web2api tests scripts` |
+| Sdist carries and passes the full suite; wheel entry points run | `python -m build` plus extracted-sdist and installed-wheel smoke tests |
+| Docker image builds without publishing on PRs | `docker/build-push-action` |
+| Windows executable builds and answers `/health` | `python scripts/build_windows.py --clean` on `windows-latest` |
 
 Run the **no-httpx** configuration locally before pushing. It is the one people
 forget, and it catches code that quietly assumes `httpx` is present:
@@ -67,13 +68,12 @@ Eleven streaming tests skip there by design. Everything else must pass.
 
 **This trips up every contributor, including the maintainers.**
 
-`README.md`, `README_CN.md` and `docs/CHANGELOG.md` each state the number of
-tests in the suite, and a test asserts all three match the number that actually
-runs. Add or remove a test and you must update all three in the same commit, or
-CI fails with something like:
+`README.md` and `README_CN.md` state the number of tests in the suite, and a
+test asserts both match the number that actually runs. Add or remove a test and
+you must update both in the same commit, or CI fails with something like:
 
 ```
-AssertionError: 484 != 486 : README.md claims 484 tests but the suite has 486
+AssertionError: README.md claims 759 tests but the suite has 760
 ```
 
 The count is deliberate: a README that advertises a test total nobody verifies
@@ -146,10 +146,11 @@ state, keep it JSON-serialisable and remember the page is served from the
 **unauthenticated** `GET /` — so it may carry facts, but never secrets, client
 addresses, or request history.
 
-**History stores operational facts only.** Method, query-stripped path, status,
-resolved model, latency, request id, client address. Never a prompt, a response
-body, or a credential. Query strings are stripped precisely because
-Google-native clients pass `?key=<api_key>`.
+**Logs and history never retain query credentials.** The access logger strips
+the entire query string before emitting a request line (even at debug level),
+and history stores only the query-stripped path. Neither contains a prompt,
+response body or API key. Query strings are stripped because Google-native
+clients may pass `?key=<api_key>`.
 
 **HTTP/1.1 framing is load-bearing.** The request body is drained in `do_POST`
 *before* auth and routing, so a rejected request cannot leave unread bytes on a

@@ -320,7 +320,7 @@ the manifest was verified to fail the step with
 reports 26 skips rather than 15 unless `httpx` is installed, because the
 incremental-streaming tests gate on it — CI installs it first.
 
-Expect **756 tests and 15 skips** from an extracted sdist: 5 git-dependent and
+Expect **760 tests and 15 skips** from an extracted sdist: 5 git-dependent and
 10 repository-metadata. Anything else means either a file stopped shipping or a
 guard started skipping for a new reason. `test_the_sdist_ships_every_file_the_docs_promise`
 guards the first half automatically.
@@ -360,8 +360,8 @@ parse, so keep human-readable messages on stderr (`say()`).
 ## Linting
 
 ```bash
-ruff check gemini_web2api tests
-python -m compileall -q gemini_web2api tests
+ruff check gemini_web2api.py gemini_web2api tests scripts
+python -m compileall -q gemini_web2api.py gemini_web2api tests scripts
 ```
 
 Config is in `pyproject.toml`: line length 110, target py38, rules `E,F,I,B,SIM,UP`.
@@ -441,7 +441,7 @@ entry.
 ## Release checklist
 
 ```bash
-ruff check gemini_web2api tests
+ruff check gemini_web2api.py gemini_web2api tests scripts
 python -m unittest discover -s tests -t .
 python3 -m venv /tmp/nohttpx && /tmp/nohttpx/bin/python -m unittest discover -s tests -t .
 python -m build
@@ -467,7 +467,7 @@ Then:
 
 | Job | What it does |
 |---|---|
-| `test` | full suite on Python 3.8, 3.11, 3.12, 3.13 |
+| `test` | full suite on every supported interpreter: Python 3.8–3.13 |
 | `test-without-httpx` | suite with no third-party packages installed |
 | `package` | `python -m build`, **run the suite from the extracted sdist**, install the wheel, run the console script and the shim |
 | `lint` | `ruff check` + `compileall` |
@@ -488,13 +488,13 @@ guard that silently skips is indistinguishable from one that ran, and job logs
 are not always reachable when you need to check. `CIWorkflowTests` fails if that
 audit is removed.
 
-The baseline is **`skipped=0`** on Python 3.11+ and **`skipped=7`** on 3.8 — the
-seven `PyprojectTests`/`VersionConsistencyTests` cases that read
+The baseline is **`skipped=0`** on Python 3.11+ and **`skipped=7`** on Python
+3.8–3.10 — the seven `PyprojectTests`/`VersionConsistencyTests` cases that read
 `pyproject.toml` with `tomllib`, which is 3.11+. Those are benign: the file they
 check is the same on every leg, and the 3.11–3.13 jobs do run them. Anything
-*other* than those seven on the 3.8 leg, or any skip at all elsewhere, means a
-guard has stopped guarding — most likely because `node` went missing, which the
-annotation reports alongside.
+*other* than those seven on the 3.8–3.10 legs, or any skip at all elsewhere,
+means a guard has stopped guarding — most likely because `node` went missing,
+which the annotation reports alongside.
 
 The `test-without-httpx` job legitimately skips more (every incremental-streaming
 test needs `httpx`), which is the point of that job rather than a gap in it.

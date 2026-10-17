@@ -26,11 +26,19 @@ Open ``http://localhost:8081/`` in a browser for the status dashboard.
 import os
 import sys
 
-# Make sure the sibling package is importable even when this file is invoked
-# through a symlink or from another working directory.
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+# Prefer the sibling source package when this shim is in a checkout. For a
+# standalone copy beside an installed wheel, remove the script's directory from
+# import search: this file has the same name as the package and would otherwise
+# shadow the installed ``gemini_web2api`` package.
+_HERE = os.path.dirname(os.path.realpath(__file__))
+if os.path.isdir(os.path.join(_HERE, "gemini_web2api")):
+    if _HERE not in sys.path:
+        sys.path.insert(0, _HERE)
+else:
+    sys.path[:] = [
+        entry for entry in sys.path
+        if os.path.realpath(os.path.abspath(entry or os.getcwd())) != _HERE
+    ]
 
 try:
     from gemini_web2api.__main__ import main

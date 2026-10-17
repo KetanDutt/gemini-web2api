@@ -234,7 +234,7 @@ vector. **Fix:** `max_request_bytes` (default 25 MiB), HTTP 413 on breach.
 | No environment-variable configuration (12-factor) | every key readable from `GEMINI_WEB2API_*`, with type coercion |
 | Container ran as root | non-root `USER` |
 | No graceful shutdown on `SIGTERM` | signal handlers + drain |
-| No rate limiting (the Cloudflare Worker had it, Python did not) | sliding-window limiter per API key / client IP, off by default |
+| No rate limiting (the Cloudflare Worker had it, Python did not) | fixed-window limiter per API key / client IP, off by default |
 | No request IDs; logs impossible to correlate | `X-Request-Id` echoed and logged |
 | `X-Accel-Buffering: no` absent, so nginx buffered SSE | added |
 | HTTP/1.0 — a new TCP connection per request | HTTP/1.1 + keep-alive, `TCP_NODELAY`, pooled httpx client |

@@ -11,6 +11,29 @@ was reproduced.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Configuration reloads no longer inherit stale values.** Each `load_config()`
+  now starts from a fresh copy of defaults and clears old explicit-key markers
+  before applying the selected file and environment, so a smaller or missing
+  second config cannot keep credentials or options from an earlier load.
+- **Query-string API keys no longer reach debug access logs.** Google-native
+  clients can still authenticate with `?key=...`, but the request target is
+  redacted before the standard HTTP logger formats it; request history was
+  already query-free.
+- **A standalone compatibility shim no longer hides an installed package.**
+  Because `gemini_web2api.py` shares the package name, a copy outside the source
+  tree used to import itself instead of the wheel. The shim now prefers the
+  sibling source package or, when absent, resolves the installed package.
+- Hardened the keep-alive accounting regression test to wait for the server's
+  post-write counter update instead of racing the client response against the
+  request thread scheduler.
+- **Rate-limit windows survive system-clock corrections.** The limiter now uses
+  monotonic elapsed time for bucket expiry and cleanup, so an NTP or manual clock
+  jump cannot reset a bucket early or extend it unexpectedly.
+- Corrected stale documentation that called the Python limiter sliding-window
+  and updated the READMEs to the current package version and test count.
+
 ### Added
 
 - **A Windows application build.** `build_windows.bat` (or

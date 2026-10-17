@@ -39,7 +39,10 @@ touching the others.
 | `x-goog-api-key: <key>` | `sk-one` | Gemini CLI |
 | `?key=<key>` query parameter | `/v1beta/models?key=sk-one` | Google-native clients |
 
-The `Bearer` scheme is matched case-insensitively.
+The `Bearer` scheme is matched case-insensitively. Query-string credentials are
+supported for compatibility, but headers are preferable where the client allows
+them: URLs can be retained by clients and external proxies. This server strips
+the query from its own access logs and request history.
 
 Comparisons use `hmac.compare_digest` rather than `in`, so the check does not
 short-circuit on the first differing byte.

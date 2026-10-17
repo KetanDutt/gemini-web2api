@@ -464,12 +464,15 @@ Details, including the payload slot map and the image upload flow:
 ```bash
 pip install -e ".[dev]"
 python -m unittest discover -s tests -t .
-ruff check gemini_web2api tests
+ruff check gemini_web2api.py gemini_web2api tests scripts
 ```
 
-756 tests, all offline — the Gemini wire protocol is faked at the frame level.
-CI covers Python 3.8–3.13, a stdlib-only run with no third-party packages, a
-build-and-install-the-wheel check, lint and a Docker build.
+760 tests, all offline — the Gemini wire protocol is faked at the frame level.
+CI tests every advertised Python version (3.8–3.13), verifies the core with no
+third-party packages, runs the suite from the source distribution, smoke-tests
+the installed wheel and shim, lints and compiles every Python directory, builds
+the Docker image, and builds and health-checks the Windows executable. Version
+tags publish multi-architecture images to GHCR.
 
 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**
 
@@ -499,7 +502,7 @@ allocate. Read the
 [divergence table](cloudflare/README.MD#-与-python-版本的差异) before choosing.
 
 Version numbers are independent sequences: the Worker is
-`1.6.2-cf-multifingerprint`, this package is `1.2.0`.
+`1.6.2-cf-multifingerprint`, this package is `1.3.0`.
 
 ## Acknowledgments
 

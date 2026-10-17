@@ -73,6 +73,13 @@ class KeepAliveAccountingTests(ServerTestCase):
 
         # Distinct IDs: a reused ID makes log correlation meaningless.
         self.assertEqual(len(set(ids)), 3)
+        # The response body can reach the client just before the handler thread
+        # increments its process-wide counter, because accounting follows the
+        # body write. Wait for that boundedly rather than making a scheduler race
+        # decide whether this keep-alive regression test passes.
+        self.assertTrue(_wait_for(
+            lambda: metrics.snapshot()["counters"]["requests"] >= before + 3),
+            "not every completed keep-alive request reached the request counter")
         after = metrics.snapshot()["counters"]["requests"]
         self.assertEqual(after - before, 3)
 

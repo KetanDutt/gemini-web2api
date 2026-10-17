@@ -215,6 +215,22 @@ class ShimTests(unittest.TestCase):
             capture_output=True, text=True, timeout=60, cwd=os.path.dirname(REPO_ROOT))
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_standalone_shim_does_not_shadow_an_installed_package(self):
+        """A downloaded shim can share its name with the installed package."""
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, True)
+        shim = os.path.join(directory, "gemini_web2api.py")
+        shutil.copyfile(SHIM_PATH, shim)
+        env = os.environ.copy()
+        env["PYTHONPATH"] = os.pathsep.join(
+            part for part in (REPO_ROOT, env.get("PYTHONPATH", "")) if part)
+        result = subprocess.run(
+            [sys.executable, shim, "--version"], capture_output=True, text=True,
+            timeout=60, cwd=directory, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        from gemini_web2api import __version__
+        self.assertIn(__version__, result.stdout)
+
     def test_package_wins_over_the_shim_on_import(self):
         """`import gemini_web2api` must resolve to the package, not the shim."""
         import gemini_web2api
