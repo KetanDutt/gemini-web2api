@@ -189,7 +189,7 @@ class HttpErrorDescriptionTests(unittest.TestCase):
 
         Note the asymmetry: this test passes on 3.9+ whether or not the code is
         correct, because newer interpreters raise `AttributeError` there. It is
-        the 3.8 CI leg that makes it a guard, which is exactly why the fix is
+        a Python 3.8 run that makes it a guard, which is exactly why the fix is
         written to not depend on `getattr` at all.
         """
         import urllib.error

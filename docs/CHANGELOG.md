@@ -41,8 +41,8 @@ was reproduced.
   `dist\windows\gemini-web2api\gemini-web2api.exe` with PyInstaller, smoke-tests
   it with `--version` and writes a portable zip. `--onefile`, `--clean` and
   `--dry-run` are supported. Build tools live in `.venv-build`, so the runtime
-  environment is untouched. CI builds the executable on `windows-latest`, starts
-  it and checks `/health`.
+  environment is untouched. The executable can be built and health-checked
+  locally on Windows; this project does not automate Windows builds.
 - **The executable is a launcher, not just a binary.** `gemini_web2api.windows`
   runs from the executable's folder, writes a localhost-only `config.json` on the
   first run, and opens the dashboard once the port is bound (`--no-browser`
@@ -66,12 +66,13 @@ was reproduced.
   `X-Forwarded-For` address instead of the proxy's. Off by default because
   the header is spoofable without a proxy in front. `--trust-proxy-headers`
   on the CLI.
-- **CI is back.** `.github/workflows/ci.yml` (test matrix 3.8–3.13, a
-  stdlib-only job, package build with the suite re-run from the extracted
-  sdist, lint, Docker build, Windows executable build) and
-  `.github/workflows/docker.yml` (multi-arch GHCR publish) are restored,
-  so the guards that assert CI's shape pass again instead of erroring on
-  a missing file.
+
+### Removed
+
+- Removed `.github/workflows/ci.yml` and `.github/workflows/docker.yml`.
+  The project intentionally has no GitHub workflows or automated CI; the
+  contributor guide now states that neither should be added in the future and
+  documents manual validation instead.
 
 ### Performance
 

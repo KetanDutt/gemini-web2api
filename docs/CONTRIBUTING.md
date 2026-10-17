@@ -3,9 +3,10 @@
 Thanks for considering a change to gemini-web2api.
 
 This document is about **how to contribute** — what a good issue and pull
-request look like here, and which project-specific rules will cause CI to reject
-an otherwise reasonable change. For the technical how-to (repository layout,
-adding a model, adding an endpoint, changing the wire protocol, releasing), see
+request look like here, which checks to run manually and which project-specific
+rules are important. This project intentionally has no automated CI. For the
+technical how-to (repository layout, adding a model, adding an endpoint,
+changing the wire protocol, releasing), see
 [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ---
@@ -40,22 +41,35 @@ account.
 
 ## Pull requests
 
-### What CI enforces
+### No automated CI — project policy
 
-A PR is green when all of these hold:
+This project intentionally has no GitHub Actions workflows and no automated
+CI configuration. **Do not add GitHub Actions workflows or other automated CI
+configuration to this project in the future.** Checks are not run automatically
+on pushes or pull requests; contributors and maintainers run them manually.
+`tests/test_packaging.py` guards this policy against workflow and common hosted
+CI configuration files.
 
-| Check | Command |
+### Manual validation before opening a PR
+
+Run the checks that apply to your change before requesting review:
+
+| Check | Command / notes |
 |---|---|
-| Full suite on every supported Python version (3.8–3.13) | `python -m unittest discover -s tests -t .` |
-| Core suite passes with no third-party packages | same, after removing optional `httpx` |
-| Ruff lint covers the shim, package, tests and scripts | `ruff check gemini_web2api.py gemini_web2api tests scripts` |
-| Byte-compile covers every Python directory | `python -m compileall -q gemini_web2api.py gemini_web2api tests scripts` |
-| Sdist carries and passes the full suite; wheel entry points run | `python -m build` plus extracted-sdist and installed-wheel smoke tests |
-| Docker image builds without publishing on PRs | `docker/build-push-action` |
-| Windows executable builds and answers `/health` | `python scripts/build_windows.py --clean` on `windows-latest` |
+| Full test suite | `python -m unittest discover -s tests -t .` |
+| Zero-dependency core | Run the suite in a fresh virtual environment without optional `httpx` (instructions below) |
+| Lint | `ruff check gemini_web2api.py gemini_web2api tests scripts` |
+| Byte-compile | `python -m compileall -q gemini_web2api.py gemini_web2api tests scripts` |
+| Package validation | `python -m build`, then run the extracted-sdist test and wheel smoke checks described in [DEVELOPMENT.md](DEVELOPMENT.md#run-the-suite-from-an-extracted-sdist) and the [release checklist](DEVELOPMENT.md#release-checklist) |
+| Docker | When changing the image, run `docker build -t gemini-web2api:local .` |
+| Windows application | On Windows, run `python scripts/build_windows.py --clean` and smoke-test the executable; see [DEVELOPMENT.md](DEVELOPMENT.md#release-checklist) |
 
-Run the **no-httpx** configuration locally before pushing. It is the one people
-forget, and it catches code that quietly assumes `httpx` is present:
+Where supported, run the full suite on Python 3.8–3.13; this repository has no
+hosted matrix to do that for you. The suite is offline and the Gemini wire
+protocol is faked at the frame level.
+
+Run the **no-httpx** configuration locally before pushing. It catches code that
+quietly assumes the optional transport is installed:
 
 ```bash
 python -m venv /tmp/nohttpx
@@ -70,10 +84,11 @@ Eleven streaming tests skip there by design. Everything else must pass.
 
 `README.md` and `README_CN.md` state the number of tests in the suite, and a
 test asserts both match the number that actually runs. Add or remove a test and
-you must update both in the same commit, or CI fails with something like:
+you must update both in the same commit, or the documentation-consistency test
+fails with something like:
 
 ```
-AssertionError: README.md claims 759 tests but the suite has 760
+AssertionError: README.md claims 755 tests but the suite has 756
 ```
 
 The count is deliberate: a README that advertises a test total nobody verifies
@@ -85,7 +100,7 @@ The project supports Python 3.8. That is enforced by parsing the source with
 `ast` and rejecting newer syntax in annotation position — not by trusting
 `compile()`, which succeeds under a newer interpreter and proves nothing.
 
-So these will fail the build even though they work on your machine:
+So the compatibility tests reject these even if they work on your machine:
 
 ```python
 def f(items: list[str]) -> dict[str, int]: ...   # PEP 585, needs 3.9+
@@ -110,7 +125,8 @@ matches `DEFAULT_CONFIG`, every config key is documented, every documented model
 exists and every real model is documented, every docs page is reachable from the
 index and the README, API.md documents no unrouted endpoint, no secret file is
 tracked by git, the Cloudflare Worker's model table matches Python's,
-`start.bat` keeps CRLF line endings, and CI lints every Python directory.
+`start.bat` keeps CRLF line endings, and the local Ruff/byte-compile commands
+cover every Python directory.
 
 The full list with rationale is in
 [DEVELOPMENT.md — What is asserted](DEVELOPMENT.md#what-is-asserted).
@@ -127,8 +143,8 @@ These are easy to break accidentally and expensive to debug afterwards.
 
 **Never let a test's pass condition be "the network is unreachable."** The suite
 is fully offline; the Gemini wire protocol is faked at the frame level. A test
-that mocks DNS resolution but leaves `urlopen` live will pass in CI and tell you
-nothing. Worse, `fetch_image_bytes` swallows exceptions into `b""`, so a guard
+that mocks DNS resolution but leaves `urlopen` live can pass locally and tell
+you nothing. Worse, `fetch_image_bytes` swallows exceptions into `b""`, so a guard
 that *raises* into it is not a guard at all — record the attempt and assert
 afterwards.
 
@@ -189,7 +205,7 @@ CR-terminated lines. See
   or an invariant that is easy to break. The codebase is written that way
   deliberately; match it.
 - Documentation lives in `docs/`. A new page must be linked from
-  `docs/README.md` and from the root `README.md`, or CI fails.
+  `docs/README.md` and from the root `README.md`, or the documentation test fails.
 
 ---
 

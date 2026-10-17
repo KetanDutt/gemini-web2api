@@ -14,7 +14,7 @@ Start with the [project README](../README.md) for the 60-second version.
 | [SECURITY.md](SECURITY.md) | Threat model, what is protected by default, and what you must decide yourself |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Symptom → cause → fix, including empty replies, HTTP 405/429, and Pro not routing |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Layout, running tests, adding a model, release checklist |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | How to file an issue and open a PR, what CI enforces, and the invariants that are easy to break |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to file an issue and open a PR, manual checks, the no-CI policy and invariants that are easy to break |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in each version |
 | [AUDIT.md](AUDIT.md) | The full defect audit behind the 1.2.0 hardening pass, with reproductions |
 

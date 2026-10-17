@@ -238,7 +238,7 @@ vector. **Fix:** `max_request_bytes` (default 25 MiB), HTTP 413 on breach.
 | No request IDs; logs impossible to correlate | `X-Request-Id` echoed and logged |
 | `X-Accel-Buffering: no` absent, so nginx buffered SSE | added |
 | HTTP/1.0 — a new TCP connection per request | HTTP/1.1 + keep-alive, `TCP_NODELAY`, pooled httpx client |
-| No CI for the test suite | `.github/workflows/ci.yml` |
+| No CI for the test suite | Originally addressed with a workflow; now intentionally absent under the project policy. Run the manual checks in `docs/CONTRIBUTING.md`. |
 | No `docs/` | this folder |
 | No machine-readable status page / UI | dashboard at `GET /` |
 

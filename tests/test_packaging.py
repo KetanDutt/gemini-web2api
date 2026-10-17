@@ -58,8 +58,8 @@ NO_GIT = "not a git working tree (sdist or git archive checkout)"
 def _repo_metadata_guarded(*parts):
     """True when a guard on repository metadata should run.
 
-    `.gitignore`, `.gitattributes` and `.github/` are VCS and CI metadata. They
-    are deliberately absent from a source distribution, where they would mean
+    `.gitignore` and `.gitattributes` are repository metadata. They are
+    deliberately absent from a source distribution, where they would mean
     nothing, so guards on them skip there. But inside a git working tree their
     absence is a defect, so the guard still runs and fails loudly. Skipping
     whenever the file is merely missing would turn a deleted `.gitattributes`
@@ -74,7 +74,7 @@ def _repo_metadata_guarded(*parts):
 # Files setuptools puts in every sdist whatever MANIFEST.in says.
 _SDIST_ALWAYS_INCLUDED = {"pyproject.toml", "MANIFEST.in", "LICENSE", "README.md"}
 
-# Files that must never be in a distribution: VCS/CI metadata is meaningless
+# Files that must never be in a distribution: VCS metadata is meaningless
 # outside a repository, and the rest are local secrets MANIFEST.in excludes.
 _SDIST_NEVER_INCLUDED = {".gitignore", ".gitattributes", "config.json",
                          "cookie.txt", "cookie.json", "gemini-auth.json", ".env"}
@@ -101,7 +101,6 @@ def _manifest_include_names():
 
 HAS_GITIGNORE = _repo_metadata_guarded(".gitignore")
 HAS_GITATTRIBUTES = _repo_metadata_guarded(".gitattributes")
-HAS_CI_WORKFLOW = _repo_metadata_guarded(".github", "workflows", "ci.yml")
 NO_REPO_METADATA = "repository metadata is not part of a source distribution"
 
 
@@ -643,12 +642,11 @@ def _dockerfile_copy_sources(text):
 class DockerfileTests(unittest.TestCase):
     """The Dockerfile and .dockerignore must agree.
 
-    CI is the only place this repository's image gets built, so a conflict
-    between the two files cannot be caught locally - and it cost a failed build
-    to find this one. `COPY README.md LICENSE` had been added while `*.md` and
-    `LICENSE` were added to .dockerignore, so neither file reached the build
-    context. Both checks below are static, which is the point: they run
-    anywhere, with no container runtime.
+    There is deliberately no automated image build in this repository, so
+    static checks keep Dockerfile COPY sources aligned with .dockerignore even
+    when Docker is unavailable. `COPY README.md LICENSE` had been added while
+    `*.md` and `LICENSE` were added to .dockerignore, so neither file reached
+    the build context. Both checks below run anywhere, with no container runtime.
     """
 
     @classmethod
@@ -1732,8 +1730,8 @@ class WorkerImageHandlingTests(unittest.TestCase):
 class WindowsLauncherTests(unittest.TestCase):
     """The one-click Windows launcher must be safe to double-click.
 
-    These are content assertions: a .bat cannot be executed on the Linux CI
-    runner, so the guards check the properties that make the difference between
+    These are content assertions: a .bat cannot be executed by the Python test
+    suite on non-Windows hosts, so the guards check the properties that make the difference between
     a launcher that works and one that silently opens a window and vanishes.
     """
 
@@ -2042,172 +2040,43 @@ class WindowsSetupHelperTests(unittest.TestCase):
         self.assertEqual(lines, ["PORT=8081", "CREATED=1"])
 
 
-def _workflow_run_blocks(text):
-    """Return ``[(step_name, script)]`` for every ``run:`` block in a workflow.
+class AutomationPolicyTests(unittest.TestCase):
+    """The project intentionally has no hosted or automated CI."""
 
-    A hand-rolled scan rather than a YAML parse: this suite has to run with the
-    standard library alone (the stdlib-only CI job proves that), and pyyaml is
-    deliberately not a dependency.
-    """
-    blocks = []
-    lines = text.splitlines()
-    name = ""
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        stripped = line.strip()
-        if stripped.startswith("- name:"):
-            name = stripped.split("- name:", 1)[1].strip()
-        elif stripped.startswith("name:"):
-            name = stripped.split("name:", 1)[1].strip()
-        match = (re.match(r"^(\s*)-\s+run:\s*(.*)$", line)
-                 or re.match(r"^(\s*)run:\s*(.*)$", line))
-        if match:
-            indent = len(match.group(1))
-            rest = match.group(2).strip()
-            if rest in ("|", "|-", ">", ">-", "|+", ">+"):
-                body = []
-                index += 1
-                while index < len(lines):
-                    following = lines[index]
-                    if not following.strip():
-                        body.append("")
-                        index += 1
-                        continue
-                    if len(following) - len(following.lstrip()) <= indent:
-                        break
-                    body.append(following)
-                    index += 1
-                blocks.append((name, "\n".join(body)))
-                continue
-            if rest:
-                blocks.append((name, rest))
-        index += 1
-    return blocks
+    FORBIDDEN_CONFIGS = (
+        ".github/workflows",
+        ".travis.yml",
+        ".circleci",
+        ".buildkite",
+        ".gitlab-ci.yml",
+        "appveyor.yml",
+        ".appveyor.yml",
+        ".drone.yml",
+        ".woodpecker.yml",
+        ".cirrus.yml",
+        ".semaphore",
+        ".teamcity",
+        "azure-pipelines.yml",
+        "bitbucket-pipelines.yml",
+        "Jenkinsfile",
+    )
 
-
-def _suite_lines(script):
-    """The lines of ``script`` that actually invoke the test suite."""
-    return [line for line in _shell_commands(script)
-            if re.search(r"python\s+-m\s+unittest", line)]
-
-
-def _shell_commands(script):
-    """The executable lines of a shell block, with comments dropped.
-
-    Scanning raw text lets prose defeat the assertion: this block's own
-    comment says "WITHOUT pipefail", so a check for that word passes on a
-    script that never enables it. Only real commands should count.
-    """
-    return [line for line in script.splitlines()
-            if line.strip() and not line.lstrip().startswith("#")]
-
-
-def _enables_pipefail(script):
-    """True only if the block turns pipefail on with an actual ``set``."""
-    return any(re.search(r"\bset\b.*\bpipefail\b", line)
-               for line in _shell_commands(script))
-
-
-def _pipes_status_away(line):
-    """True when the line hands its exit status to the command on its right.
-
-    ``||`` and ``2>&1`` are a short-circuit and a redirection, not pipelines;
-    only a bare ``|`` makes the exit status belong to whatever follows it.
-    """
-    return "|" in line.replace("||", "")
-
-
-@unittest.skipUnless(HAS_CI_WORKFLOW, NO_REPO_METADATA)
-class CIWorkflowTests(unittest.TestCase):
-    """CI must fail when the suite fails.
-
-    These guards exist because this branch shipped exactly that defect. The
-    test step was rewritten as ``python -m unittest ... | tee out.txt`` so the
-    skip audit could be logged. Actions' default shell on Linux is
-    ``bash -e {0}`` - note the missing ``pipefail`` - so a pipeline reports the
-    status of its *last* command. ``tee`` always succeeds, which means all four
-    matrix jobs would have gone green no matter what the suite did. The
-    checkmark stayed green while the thing it verified stopped being verified.
-
-    Piping a test runner into a logger is a natural edit to make, so the
-    invariant is asserted here rather than left to code review.
-    """
-
-    @classmethod
-    def setUpClass(cls):
-        cls.path = os.path.join(REPO_ROOT, ".github", "workflows", "ci.yml")
-        with open(cls.path, encoding="utf-8") as handle:
-            cls.text = handle.read()
-        cls.run_blocks = _workflow_run_blocks(cls.text)
-        cls.suite_scripts = [script for _, script in cls.run_blocks
-                             if _suite_lines(script)]
-
-    def test_the_run_blocks_are_actually_parsed(self):
-        """Guards the guard: an empty parse makes every check below vacuous."""
-        self.assertTrue(self.run_blocks, "no `run:` blocks found in ci.yml")
-        self.assertGreaterEqual(
-            len(self.suite_scripts), 2,
-            "expected at least the matrix job and the stdlib-only job to run "
-            f"the suite, found {len(self.suite_scripts)} - the parser is "
-            "probably broken, which would make the guards below pass vacuously")
-
-    def test_a_piped_suite_run_cannot_swallow_the_exit_status(self):
-        offenders = []
-        for name, script in self.run_blocks:
-            if not _suite_lines(script):
-                continue
-            for line in _suite_lines(script):
-                if _pipes_status_away(line) and not _enables_pipefail(script):
-                    offenders.append(f"{name}: {line.strip()}")
+    def test_no_workflow_or_hosted_ci_configuration_is_present(self):
+        present = [name for name in self.FORBIDDEN_CONFIGS
+                   if os.path.exists(os.path.join(REPO_ROOT, name))]
         self.assertEqual(
-            offenders, [],
-            "the suite's exit status is piped into a command that always "
-            "succeeds and the block never sets `pipefail`. Actions' default "
-            "shell is `bash -e` without it, so a failing suite would still be "
-            "reported as a pass: " + "; ".join(offenders))
+            present, [],
+            "This project intentionally has no GitHub workflows or automated "
+            "CI configuration; do not add these files.")
 
-    def test_a_captured_exit_status_is_re_raised(self):
-        for name, script in self.run_blocks:
-            if not _suite_lines(script):
-                continue
-            commands = "\n".join(_shell_commands(script))
-            for variable in re.findall(r"\|\|\s*(\w+)=\$\?", commands):
-                self.assertRegex(
-                    commands, r"exit\s+\$\{?" + re.escape(variable),
-                    f"{name} captures ${variable} from the suite but never "
-                    "exits with it, so the step ends on the status of its last "
-                    "command and the failure is discarded")
-
-    def test_the_suite_step_reports_what_it_skipped(self):
-        """A guard that silently skips is indistinguishable from one that ran.
-
-        Two families of guards here are skip-gated: the Node-backed dashboard
-        checks and the git-backed launcher checks. If the tool they need is
-        missing they skip, the step still exits 0, and CI stays green while
-        covering less than it claims. Surfacing the count costs one grep.
-        """
-        reporting = [script for script in self.suite_scripts
-                     if any("skipped" in line for line in _shell_commands(script))]
-        self.assertTrue(
-            reporting,
-            "no test job reports its skipped tests, so a missing node or git "
-            "would quietly remove guards from CI with no visible signal")
-
-    def test_ci_lints_every_python_directory(self):
-        """scripts/ holds real Python; a lint job that skips it lets rot in.
-
-        The root shim is on the list for the same reason, and it had already
-        rotted: an unused `__version__` import sat there unpoliced, and it was
-        worse than dead weight — if the installed package lacked `__version__`,
-        the shim's `except ImportError` would report "the package is missing"
-        and exit 1 for a package that was present and importable.
-        """
-        for directory in ("gemini_web2api.py", "gemini_web2api", "tests", "scripts"):
-            self.assertRegex(self.text, rf"ruff check[^\n]*\b{directory}\b",
-                             f"CI does not lint {directory}/")
-            self.assertRegex(self.text, rf"compileall[^\n]*\b{directory}\b",
-                             f"CI does not compile-check {directory}/")
+    def test_contributor_docs_prohibit_adding_workflows_or_ci(self):
+        path = os.path.join(REPO_ROOT, "docs", "CONTRIBUTING.md")
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+        self.assertIn(
+            "Do not add GitHub Actions workflows or other automated CI "
+            "configuration to this project in the future.",
+            " ".join(text.split()))
 
 
 class SyntaxTests(unittest.TestCase):

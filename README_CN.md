@@ -43,7 +43,7 @@
 - **代理感知** —— 在反向代理之后，可启用 `trust_proxy_headers`，按
   `X-Forwarded-For` 中的真实客户端地址进行限流与历史记录（默认关闭，因为没有
   代理时该请求头可被伪造）
-- **生产级打包** —— 非 root Docker 镜像、健康检查、环境变量配置、优雅停机、CI
+- **生产级打包** —— 非 root Docker 镜像、健康检查、环境变量配置与优雅停机
 - **Windows 一键启动** —— 双击 `start.bat` 即可创建虚拟环境、安装依赖、生成安全的 `config.json` 并启动服务
 - **零必需依赖** —— Python 3.8+，`httpx` 为可选
 
@@ -83,6 +83,8 @@ docker run -d --name gemini-web2api -p 8081:8081 \
   -e GEMINI_WEB2API_API_KEYS="sk-your-key" \
   ghcr.io/ketandutt/gemini-web2api:latest
 ```
+
+如镜像可用，可直接使用 GHCR 上的版本；本项目不会自动构建或发布容器镜像。
 
 ### Docker Compose
 
@@ -351,7 +353,7 @@ curl -s http://localhost:8081/status | python3 -m json.tool   # 指标 + 脱敏�
 | [docs/SECURITY.md](docs/SECURITY.md) | 威胁模型与默认防护 |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 现象 → 原因 → 解决 |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 目录结构、测试、新增模型、发布清单 |
-| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | 如何提 issue 与 PR、CI 检查项、项目约定 |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | 如何提 issue 与 PR、手动验证步骤、无 CI 政策与项目约定 |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | 版本历史 |
 | [docs/AUDIT.md](docs/AUDIT.md) | 1.2.0 缺陷审计（含复现方式） |
 
@@ -384,7 +386,8 @@ python -m unittest discover -s tests -t .
 ruff check gemini_web2api.py gemini_web2api tests scripts
 ```
 
-760 个测试，全部离线运行——Gemini 协议在帧级别被模拟。CI 覆盖所有声明支持的 Python 版本（3.8–3.13），验证无第三方依赖的核心运行、从源码分发包运行完整测试、安装 wheel 与 shim 的启动、lint 与全部 Python 目录的编译、Docker 镜像构建，以及 Windows 可执行文件构建与健康检查。版本标签会发布多架构 GHCR 镜像。
+756 个测试，全部离线运行——Gemini 协议在帧级别被模拟。提交 PR 前请手动运行验证。本项目刻意不配置 GitHub Actions 工作流或任何自动化 CI；**今后不得向本项目添加 GitHub 工作流或 CI**。push 和 PR 不会自动运行测试、构建或发布镜像。请参阅
+[贡献指南](docs/CONTRIBUTING.md#no-automated-ci--project-policy)中的本地验证清单。
 
 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**
 

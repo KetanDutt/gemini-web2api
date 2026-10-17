@@ -47,7 +47,7 @@ tests/
   test_endpoints.py        every HTTP route, request history
   test_security.py         auth, SSRF, limits, rate limiting
   test_metrics.py          metrics, history ring, health probe, dashboard
-  test_packaging.py        build, shim, structure, docs, launcher, CI itself
+  test_packaging.py        build, shim, structure, docs, launcher, project policy
 scripts/
   win_setup.py             config generation for start.bat (plain Python)
 start.bat                  one-click Windows launcher
@@ -85,8 +85,8 @@ python3 -m venv /tmp/nohttpx
 /tmp/nohttpx/bin/python -m unittest discover -s tests -t .
 ```
 
-11 streaming tests skip; everything else must pass. CI runs this as a separate
-job.
+Eleven streaming tests skip in this environment by design; everything else
+must pass. Install `httpx` to run those optional-transport streaming tests too.
 
 ### Test helpers
 
@@ -137,8 +137,8 @@ touching these areas, keep the tests green:
   so history (which carries client addresses) must never be embedded in it.
 * `test_metrics.HistoryTests.test_history_is_not_in_the_snapshot` — same
   invariant from the other side: `snapshot()` must stay history-free.
-* `test_packaging.WindowsLauncherTests.*` — the launcher cannot execute on the
-  Linux CI runner, so these are content guards. Each was verified to fail by
+* `test_packaging.WindowsLauncherTests.*` — the launcher cannot execute on
+  non-Windows hosts, so these are content guards. Each was verified to fail by
   injecting the violation it forbids.
 * `test_metrics.DashboardScriptTests` — the console's escaping functions are
   *executed* under Node, not merely parsed. Model output is attacker-influenced
@@ -240,20 +240,9 @@ touching these areas, keep the tests green:
   robin skips it either way. It was removed rather than kept — an unreachable
   branch is not a safety net, it is somewhere for a later bug to hide — and the
   lone-credential test now fails if it comes back.
-* `test_packaging.CIWorkflowTests` — CI must fail when the suite fails. Actions'
-  default shell on Linux is `bash -e {0}`, **without** `pipefail`, so
-  `python -m unittest ... | tee log` reports `tee`'s status and a failing suite
-  still turns the checkmark green. The guards reject a piped suite invocation
-  unless the block really enables `pipefail`, require a captured `$?` to be
-  re-raised with `exit`, and require the step to report how many tests it
-  skipped — a guard that silently skips is indistinguishable from one that ran.
-  They parse `run:` blocks by hand rather than with pyyaml, because the
-  stdlib-only job runs this suite with no third-party packages installed.
-  Note that they scan **commands, not prose**: an earlier version checked for
-  the word `pipefail` in the raw block, and the block's own comment explaining
-  the hazard satisfied it. `test_the_run_blocks_are_actually_parsed` guards the
-  parser itself, since a parser that finds nothing makes the rest pass
-  vacuously.
+* `test_packaging.AutomationPolicyTests` — this project intentionally has no
+  hosted CI. The tests reject common CI/workflow configuration paths and verify
+  that the contributor guide explicitly prohibits adding them in the future.
 * `test_packaging.MarkdownLinkTests` — every relative link and heading anchor in
   the Markdown corpus resolves. Renaming a heading without updating what points
   at it fails here. If you add an anchor link, the slug is GitHub's: lowercase,
@@ -273,10 +262,10 @@ Every git-based test therefore carries `@unittest.skipUnless(HAS_GIT, NO_GIT)`
 means git actually answered. `HAS_GIT` comes from
 `git rev-parse --is-inside-work-tree` at import time.
 
-Guards on **repository metadata** (`.gitignore`, `.gitattributes`,
-`.github/workflows/ci.yml`) use a different gate, because those files are
-deliberately absent from a distribution but their disappearance from a
-repository is a defect. They are gated on `file exists OR this is a git tree`,
+Guards on **repository metadata** (`.gitignore`, `.gitattributes`) use a
+different gate, because those files are deliberately absent from a distribution
+but their disappearance from a repository is a defect. They are gated on
+`file exists OR this is a git tree`,
 not on `HAS_GIT` alone and not on existence alone:
 
 - existence alone would turn a deleted `.gitattributes` into a silent skip — a
@@ -301,27 +290,25 @@ python -m build --sdist && mkdir -p /tmp/sdx \
   && python -m unittest discover -s tests -t .
 ```
 
-CI does this too: the `package` job runs the suite from the extracted sdist and
-emits an `sdist-suite` annotation with the exit status and summary, so a
-manifest regression fails the build instead of shipping.
+Run this check manually before a release; there is no hosted job to perform it
+for you. The test runner's exit status should be checked directly so a manifest
+regression cannot be mistaken for a successful package build.
 
-That step compares the number of tests the sdist ran against the count the
-README documents, and fails if they differ. The expectation is **derived from
-the README rather than written into the workflow**, because `README.md`'s figure
-is already enforced against the repository suite by
-`test_documentation_consistency` — so it cannot drift, whereas a literal in
-`ci.yml` went stale the moment the suite grew and nothing noticed.
+The expected test count is derived from the README because
+`test_documentation_consistency` already checks that the README figure matches
+the repository suite. Keeping one source of truth avoids a second hard-coded
+count drifting as tests change.
 
-The comparison is also what stops the step passing vacuously. `unittest` exits 0
-on a *smaller* suite, so a `MANIFEST.in` that shipped fewer test files would
-otherwise look green while quietly covering less. Dropping one test module from
-the manifest was verified to fail the step with
-`ran=460 expected=518`. Locally the same run
-reports 26 skips rather than 15 unless `httpx` is installed, because the
-incremental-streaming tests gate on it — CI installs it first.
+This count comparison also prevents a test run from passing vacuously.
+`unittest` exits 0 on a *smaller* suite, so a `MANIFEST.in` that shipped fewer
+test files would otherwise look successful while quietly covering less.
+Dropping one test module from the manifest was verified to fail with
+`ran=460 expected=518`. Without
+`httpx`, the extracted-sdist run reports additional streaming-test skips; install
+that optional dependency to match the documented baseline.
 
-Expect **760 tests and 15 skips** from an extracted sdist: 5 git-dependent and
-10 repository-metadata. Anything else means either a file stopped shipping or a
+Expect **756 tests and 9 skips** from an extracted sdist: 5 git-dependent and
+4 repository-metadata. Anything else means either a file stopped shipping or a
 guard started skipping for a new reason. `test_the_sdist_ships_every_file_the_docs_promise`
 guards the first half automatically.
 
@@ -459,45 +446,34 @@ Then:
 - [ ] `CHANGELOG.md` entry written
 - [ ] README model table current (tests enforce this)
 - [ ] `config.example.json` matches `DEFAULT_CONFIG` (tests enforce this)
-- [ ] Tag `v<version>` — the Docker workflow publishes `ghcr.io` images on tags
+- [ ] If publishing a GHCR image, build and push it manually; there is no
+      tag-triggered publishing automation
 
-## CI
+## Automated validation policy
 
-`.github/workflows/ci.yml` runs on push and PR:
+This project intentionally has no GitHub Actions workflows or automated CI.
+**Do not add GitHub workflows or CI configuration to this project in the
+future.** Tests and builds are not run automatically on pushes or pull requests;
+the contributor and maintainer are responsible for running relevant checks
+manually. `test_packaging.AutomationPolicyTests` guards the no-workflow policy.
 
-| Job | What it does |
-|---|---|
-| `test` | full suite on every supported interpreter: Python 3.8–3.13 |
-| `test-without-httpx` | suite with no third-party packages installed |
-| `package` | `python -m build`, **run the suite from the extracted sdist**, install the wheel, run the console script and the shim |
-| `lint` | `ruff check` + `compileall` |
-| `docker` | build the image (no push) with layer caching |
+For changes that touch the corresponding areas, run these checks locally:
 
-`.github/workflows/docker.yml` publishes multi-arch images to `ghcr.io` on pushes
-to `main` and on `v*` tags.
+```bash
+python -m unittest discover -s tests -t .
+ruff check gemini_web2api.py gemini_web2api tests scripts
+python -m compileall -q gemini_web2api.py gemini_web2api tests scripts
+python -m build
+# If changing the container image:
+docker build -t gemini-web2api:local .
+```
 
-The `package` job is a regression guard, not a formality: flat-layout
-auto-discovery used to fail outright because the root holds both `cloudflare/`
-and `gemini_web2api/`, so the project could not be built at all.
-
-### Expected skips
-
-The `test` job prints a `test-suite` **annotation** carrying `exit=`, `skipped=`
-and `node=`. It exists because a green checkmark is not evidence on its own: a
-guard that silently skips is indistinguishable from one that ran, and job logs
-are not always reachable when you need to check. `CIWorkflowTests` fails if that
-audit is removed.
-
-The baseline is **`skipped=0`** on Python 3.11+ and **`skipped=7`** on Python
-3.8–3.10 — the seven `PyprojectTests`/`VersionConsistencyTests` cases that read
-`pyproject.toml` with `tomllib`, which is 3.11+. Those are benign: the file they
-check is the same on every leg, and the 3.11–3.13 jobs do run them. Anything
-*other* than those seven on the 3.8–3.10 legs, or any skip at all elsewhere,
-means a guard has stopped guarding — most likely because `node` went missing,
-which the annotation reports alongside.
-
-The `test-without-httpx` job legitimately skips more (every incremental-streaming
-test needs `httpx`), which is the point of that job rather than a gap in it.
+For the zero-dependency check, use the fresh virtual environment described
+under [Verifying the zero-dependency claim](#verifying-the-zero-dependency-claim).
+For sdist and wheel smoke tests, follow [Run the suite from an extracted
+sdist](#run-the-suite-from-an-extracted-sdist). Build and smoke-test the Windows
+executable on Windows with `python scripts/build_windows.py --clean` when that
+artifact changes.
 
 ## Design notes worth knowing
 

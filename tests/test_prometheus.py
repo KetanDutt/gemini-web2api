@@ -390,7 +390,7 @@ class PrometheusEndpointTests(ServerTestCase):
         exempt from counting itself — without depending on timing.
 
         Bounded, so a counter that stops moving still returns rather than
-        hanging until the CI timeout.
+        hanging until the test runner timeout.
         """
         deadline = time.monotonic() + timeout
         value = metrics.snapshot()["counters"]["requests"]
