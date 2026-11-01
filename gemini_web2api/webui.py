@@ -1416,14 +1416,14 @@ main.content, .scroller, .crail-list, .pal-list, .msgs{scrollbar-color:var(--fil
   .crail{padding:0;background:none;border:0;box-shadow:none;overflow:visible}
   .crail-head{display:flex;flex-direction:row-reverse;align-items:center;justify-content:flex-end;
     gap:var(--sp-2);padding:0;border:0}
-  .crail-head .lbl{display:flex;align-items:center;min-height:30px;padding:0 9px;
+  .crail-head .lbl{display:flex;align-items:center;min-height:32px;padding:0 9px;
     border-radius:var(--r-2);background:var(--fill-1);border:1px solid var(--line-1);
     font-size:var(--fs-meta);font-weight:500;color:var(--fg-2);white-space:nowrap}
-  .crail-head .btn{width:30px;min-height:30px;border-radius:var(--r-2);border-color:var(--line-1)}
+  .crail-head .btn{width:32px;min-height:32px;border-radius:var(--r-2);border-color:var(--line-1)}
   .crail-list{flex-direction:row;gap:6px;overflow-x:auto;overflow-y:hidden;
     padding:0 0 2px;scroll-snap-type:x proximity}
   .crail-list:empty{display:none}
-  .conv{flex:0 0 auto;max-width:230px;scroll-snap-align:start;height:30px;
+  .conv{flex:0 0 auto;max-width:230px;scroll-snap-align:start;height:32px;
     background:var(--fill-1);border-color:var(--line-1)}
   .conv.sel::before{display:none}
   .conv .x{opacity:1}
@@ -1445,13 +1445,13 @@ main.content, .scroller, .crail-list, .pal-list, .msgs{scrollbar-color:var(--fil
   .phead-actions{width:100%;justify-content:flex-start;margin-left:0}
   #models .model-card{
     grid-template-columns:minmax(0,1fr);grid-template-areas:"name" "desc" "tags" "hint";
-    row-gap:4px;padding:12px 14px;
+    row-gap:4px;padding:12px;
   }
   .model-tags{justify-content:flex-start}
   /* Tables reflow into labelled rows: label above value, no sideways scroll. */
   table.stack-rows thead{display:none}
   table.stack-rows,table.stack-rows tbody,table.stack-rows tr,table.stack-rows td{display:block;width:100%}
-  table.stack-rows tr{padding:10px 14px;border-bottom:1px solid var(--line-1)}
+  table.stack-rows tr{padding:8px 12px;border-bottom:1px solid var(--line-1)}
   table.stack-rows tr:last-child{border-bottom:0}
   table.stack-rows td{border:0;padding:1px 0;display:flex;gap:12px;justify-content:space-between;
     align-items:baseline;text-align:right}
@@ -1461,7 +1461,7 @@ main.content, .scroller, .crail-list, .pal-list, .msgs{scrollbar-color:var(--fil
   }
   table.stack-rows td.code{white-space:normal;overflow-wrap:anywhere}
   table.stack-rows td:empty{display:none}
-  .sheet,.palette{width:100%;border-radius:var(--r-5)}
+  .sheet,.palette{width:100%;border-radius:var(--r-6)}
   .veil{align-items:flex-end;padding:8px}
   .veil--top{align-items:flex-start}
   .plot{padding-left:34px}
@@ -1502,8 +1502,8 @@ main.content, .scroller, .crail-list, .pal-list, .msgs{scrollbar-color:var(--fil
   .tile{padding:10px 11px}
   .tile .v{font-size:15px}
   .seg-btn{padding:0 5px}
-  .msg{grid-template-columns:22px minmax(0,1fr);gap:10px}
-  .msg-avatar{width:22px;height:22px}
+  .msg{grid-template-columns:20px minmax(0,1fr);gap:10px}
+  .msg-avatar{width:20px;height:20px}
   .msg-avatar svg{width:12px;height:12px}
   .msg.user .bub{max-width:100%}
   .composer .hint{display:none}
@@ -1525,9 +1525,9 @@ main.content, .scroller, .crail-list, .pal-list, .msgs{scrollbar-color:var(--fil
 /* Coarse pointers get roomier targets, never smaller type. */
 @media (pointer:coarse){
   .tab-btn{padding-top:8px;padding-bottom:7px}
-  .btn{min-height:38px}
-  .btn--sm{min-height:34px}
-  button.copy{min-height:30px;padding:5px 9px}
+  .btn{min-height:40px}
+  .btn--sm{min-height:36px}
+  button.copy{min-height:32px;padding:5px 9px}
   .switch .sw{--sw-w:36px; --sw-h:20px; --sw-pad:2px; --sw-travel:16px}
 }
 
