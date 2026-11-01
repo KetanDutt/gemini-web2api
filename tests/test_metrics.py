@@ -396,7 +396,9 @@ class DashboardScriptTests(unittest.TestCase):
         html = webui.render_dashboard({"version": "1.2.0", "uptime_sec": 1.0}).decode("utf-8")
         self.assertIn('id="accounts"', html)
         self.assertIn('id="accountsNote"', html)
-        self.assertIn("<th>State</th>", html)
+        # The header is pinned with its scope: the table is the pool's data, and
+        # a screen reader has to be able to pair each cell with its column.
+        self.assertIn('<th scope="col">State</th>', html)
 
     def test_extraction_is_dom_free(self):
         """Guards the extraction itself. If it ever pulled in DOM calls the run

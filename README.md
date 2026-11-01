@@ -57,12 +57,12 @@ Studio, ChatBox, NextChat, LobeChat, the OpenAI SDK, Codex CLI, Gemini CLI.
   another, and a single-cookie setup behaves exactly as before
 - **Web console** — open `http://localhost:8081/` for a chat playground, live
   status, request activity, model picker and ready-to-paste client config —
-  a self-contained page (no external assets) in a Liquid Glass design system:
-  six material strengths with glass reserved for floating chrome, dialogs and
-  toasts over quiet content surfaces, a floating nav rail that becomes a
-  bottom bar on phones, light/dark/system themes, directional view transitions, skeleton
-  loading, a command palette (`Ctrl`/`Cmd`+`K`), keyboard shortcuts, glass
-  toasts with visible timers and an accessible focus order — all honouring
+  a self-contained page (no external assets) in a bench-instrument design
+  system: a flat paper-grey canvas with hairline panels, mono readouts and
+  square status lamps, colour spent only on state and on the latency chart;
+  light/dark/system themes, a navigation column that becomes a bottom bar on
+  phones, a command palette (`Ctrl`/`Cmd`+`K`), keyboard shortcuts, toasts with
+  visible timers and an accessible focus order — all honouring
   `prefers-reduced-motion`, `prefers-reduced-transparency` and
   `prefers-contrast`
 - **Backpressure** — `max_concurrent_requests` caps simultaneous generations;
@@ -421,6 +421,7 @@ history entry, so a browser request can be traced to its log line.
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model and what is protected by default |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Symptom → cause → fix |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Layout, tests, adding a model, release checklist |
+| [docs/DESIGN.md](docs/DESIGN.md) | The console's design system: audit, direction, tokens |
 | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | How to contribute, manual validation, the no-CI policy and project invariants |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | Version history |
 | [docs/AUDIT.md](docs/AUDIT.md) | The 1.2.0 defect audit, with reproductions |

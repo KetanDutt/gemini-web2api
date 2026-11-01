@@ -97,6 +97,43 @@ was reproduced.
 
 ### Changed
 
+- **The web console's design system is now v4 — a bench instrument, not glass.**
+  The ambient radial washes, the grain, the masked edge lights, the pointer
+  sheen and all six backdrop-blur strengths are gone; the canvas is one flat
+  paper grey and `.glass-1`…`.glass-6` survive only as an elevation scale
+  (fill plus hairline, a shadow where something genuinely floats). Depth no
+  longer carries hierarchy — type, rules and whitespace do. Language changed
+  with it: sentence case replaces the uppercase, wide-tracked labels; the pill
+  shape is gone from buttons, tabs, tags and the topbar in favour of a radius
+  scale (6 for controls, 10 for panels, 14 for dialogs); every figure is set in
+  the mono face with tabular numerals; status is a square lamp and a word, not
+  a breathing halo. The Status tab now leads with the live figures and the
+  latency chart, then counters, accounts and tables, and keeps the redacted
+  configuration as a spec-sheet list at the end. A new traffic strip sits under
+  the page rule: one tick per recent request, height for latency, colour for
+  outcome, described in words for screen readers. The models page became a
+  divided list rather than a grid of identical cards. No route, endpoint,
+  payload or interaction changed; WCAG AA contrast, visible focus and the
+  reduced-motion / reduced-transparency / high-contrast preferences remain
+  test-enforced, and high contrast now reaches the dark theme instead of only
+  the light one. The cookie-sync extension's popup moved to the same tokens —
+  flat canvas, hairline panel, square state lamp, flat accent sparkle — so the
+  two surfaces read as one product. The audit, the direction and the rules are
+  written down in [DESIGN.md](DESIGN.md), which is the reference to consult
+  before restyling anything.
+- **The console's tables and small print were audited as markup, not just as
+  pixels.** Every column header now carries `scope="col"`, quantity columns are
+  right-aligned mono (`.num`) so a column compares down its digits, empty-state
+  titles sit at `h3` under the page's `h2` instead of skipping a level, the
+  shortcuts dialog is named by its title rather than its subtitle, and the API
+  tab no longer labels one section twice. Markdown headings in a reply, the
+  chart's axis labels and the traffic strip's caption moved onto the type scale
+  (the strip's label was 10.5px and is now 11.5px like every other meta line);
+  the page title steps 26 → 20px on phones rather than through 22 and 21. The
+  chart and the traffic strip now describe themselves in spoken English —
+  "Up to 1 second: 18 requests … Above 2 seconds: 1 request", "None ended in an
+  error status" — instead of reading axis shorthand aloud, and the palette's
+  insets line up with its search field.
 - **The web console's design system went to v3 — quieter and more spatial.**
   Glass is now spent only where depth explains hierarchy: the scrolled topbar,
   navigation rail, menus, dialogs, toasts and the composer float; panels,

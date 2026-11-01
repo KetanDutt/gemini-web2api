@@ -36,7 +36,7 @@
 - **自愈能力** —— 自动刷新 Google 的构建标签（`bl`），前端改版不会导致服务失效
 - **Prometheus 指标** —— `GET /metrics` 以文本暴露格式导出计数器、状态码与延迟直方图，可直接接入既有监控
 - **多账号轮换** —— 通过 `cookie_files` 配置多个 Google 账号，被限流（`429`）的账号进入冷却，请求立即改由其他账号完成；单 cookie 部署行为完全不变
-- **Web 控制台** —— 打开 `http://localhost:8081/`，含对话 Playground、实时状态、请求活动、模型选择与可直接粘贴的客户端配置——单文件自包含页面（不加载任何外部资源），采用 Liquid Glass 设计体系：六级材质强度、桌面端悬浮导航栏（手机上变为底部导航栏）、明亮/深色/跟随系统三种主题、方向感视图切换、骨架屏加载、命令面板（`Ctrl`/`Cmd`+`K`）、键盘快捷键、带可见计时的玻璃质感轻提示与可访问的焦点顺序，并完整支持 `prefers-reduced-motion`、`prefers-reduced-transparency` 与 `prefers-contrast`
+- **Web 控制台** —— 打开 `http://localhost:8081/`，含对话 Playground、实时状态、请求活动、模型选择与可直接粘贴的客户端配置——单文件自包含页面（不加载任何外部资源），采用仪器面板式设计体系：纸灰底色、发丝线分区、等宽数字读数与方形状态灯，颜色只用于状态与延迟图表；提供明亮/深色/跟随系统三种主题、桌面端导航栏（手机上变为底部导航栏）、命令面板（`Ctrl`/`Cmd`+`K`）、键盘快捷键、带可见计时的轻提示与可访问的焦点顺序，并完整支持 `prefers-reduced-motion`、`prefers-reduced-transparency` 与 `prefers-contrast`
 - **背压控制** —— `max_concurrent_requests` 限制同时进行的生成数；超出的请求
   立即返回 `503 server_busy` 并附 `Retry-After`，而不是在慢速上游后面堆积线程；
   `/status` 与控制台会实时显示在途容量
@@ -353,6 +353,7 @@ curl -s http://localhost:8081/status | python3 -m json.tool   # 指标 + 脱敏�
 | [docs/SECURITY.md](docs/SECURITY.md) | 威胁模型与默认防护 |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 现象 → 原因 → 解决 |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 目录结构、测试、新增模型、发布清单 |
+| [docs/DESIGN.md](docs/DESIGN.md) | 控制台设计系统：审计、方向与设计令牌 |
 | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | 如何提 issue 与 PR、手动验证步骤、无 CI 政策与项目约定 |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | 版本历史 |
 | [docs/AUDIT.md](docs/AUDIT.md) | 1.2.0 缺陷审计（含复现方式） |
