@@ -422,7 +422,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
 .mark svg{width:21px;height:21px;display:block}
 .brand-text{min-width:0;display:flex;align-items:baseline;gap:0}
 .brand-text h1{
-  font-size:15px;font-weight:600;letter-spacing:var(--track-tight);line-height:1.2;
+  font-size:var(--fs-h3);font-weight:600;letter-spacing:var(--track-tight);line-height:1.2;
   white-space:nowrap;color:var(--fg);
 }
 .brand-text p{
@@ -818,7 +818,7 @@ select{
 }
 .strip[hidden]{display:none}
 .strip-lbl{
-  font-family:var(--mono);font-size:10.5px;color:var(--fg-3);
+  font-family:var(--mono);font-size:var(--fs-micro);color:var(--fg-3);
   white-space:nowrap;font-variant-numeric:tabular-nums;
 }
 .strip-ticks{flex:1;min-width:0;display:flex;align-items:flex-end;gap:2px;height:20px;overflow:hidden}
@@ -908,7 +908,12 @@ tbody tr:last-child td{border-bottom:0}
 td.code{font-family:var(--mono);font-size:var(--fs-meta);color:var(--fg-2);white-space:nowrap;
   font-variant-numeric:tabular-nums}
 td .sub{display:block;margin-top:2px;font-size:var(--fs-micro);color:var(--fg-3)}
-td.mono{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--fg-2)}
+/* Quantities sit right and in mono, so a column can be compared by eye without
+   reading every cell. Text columns stay left; nothing is centred. */
+th.num,td.num{
+  text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;
+  color:var(--fg-2);white-space:nowrap;
+}
 tr.is-new td{animation:rowIn var(--d-5) var(--e-out)}
 @keyframes rowIn{from{background-color:var(--acc-bg)}to{background-color:transparent}}
 .tnote{padding:8px 12px;border-top:1px solid var(--line-1);font-size:var(--fs-meta);color:var(--fg-3);
@@ -954,7 +959,7 @@ tr.is-new td{animation:rowIn var(--d-5) var(--e-out)}
   border-radius:0 2px 2px 0;background:var(--accent)}
 .conv .x{
   appearance:none;border:0;background:none;color:var(--fg-3);cursor:pointer;
-  display:grid;place-items:center;width:20px;height:20px;border-radius:3px;flex:0 0 20px;
+  display:grid;place-items:center;width:20px;height:20px;border-radius:var(--r-1);flex:0 0 20px;
   opacity:0;transition:opacity var(--d-1) var(--e-out),color var(--d-1) var(--e-out),
              background-color var(--d-1) var(--e-out);
 }
@@ -1021,17 +1026,21 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
   background:var(--bad-bg);border:1px solid var(--bad-line);color:var(--bad);
   border-radius:var(--r-3);padding:10px 12px;
 }
-.msg .bub p{margin:0 0 9px}
+.msg .bub p{margin:0 0 var(--sp-2)}
 .msg .bub p:last-child{margin-bottom:0}
-.msg .bub .mdh{font-weight:600;font-size:15.5px;letter-spacing:-.01em;margin:15px 0 6px;line-height:1.35}
+.msg .bub .mdh{
+  font-size:var(--fs-lead);font-weight:600;line-height:1.3;
+  margin:var(--sp-4) 0 var(--sp-2);
+}
 .msg .bub .mdh:first-child{margin-top:0}
+.msg .bub .mdh:last-child{margin-bottom:0}
 .msg .bub pre{
-  margin:10px 0;padding:10px 12px;border-radius:var(--r-2);overflow:auto;
+  margin:var(--sp-3) 0;padding:var(--sp-3);border-radius:var(--r-2);overflow:auto;
   background:var(--code-bg);border:1px solid var(--line-1);
   font-family:var(--mono);font-size:var(--fs-meta);line-height:1.55;scrollbar-width:thin;
 }
 .msg .bub code{font-family:var(--mono);font-size:.92em;background:var(--fill-1);
-  border-color:transparent;padding:0 4px;border-radius:3px}
+  border-color:transparent;padding:0 4px;border-radius:var(--r-1)}
 .msg .bub pre code{background:none;border:0;padding:0}
 .msg .bub strong{font-weight:600}
 .mmeta{
@@ -1039,7 +1048,8 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
   margin-top:8px;font-size:var(--fs-micro);color:var(--fg-3);
   font-family:var(--mono);font-variant-numeric:tabular-nums;
 }
-.mmeta .mchip{padding:0 5px;border-radius:3px;background:var(--fill-1);border:1px solid var(--line-1)}
+.mmeta .mchip{padding:0 5px;border-radius:var(--r-1);background:var(--fill-1);
+  border:1px solid var(--line-1)}
 /* Streaming caret: a thin bar that marks where the next token lands. */
 .cursor{
   display:inline-block;width:2px;height:1em;margin-left:2px;
@@ -1052,8 +1062,8 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
 .thread-anchor::before,.thread-anchor::after{content:"";height:1px;flex:1;background:var(--line-1)}
 
 .tobottom{
-  position:absolute;right:16px;bottom:14px;z-index:var(--z-panel);
-  width:30px;height:30px;border-radius:var(--r-2);cursor:pointer;
+  position:absolute;right:var(--sp-4);bottom:var(--sp-4);z-index:var(--z-panel);
+  width:32px;height:32px;border-radius:var(--r-2);cursor:pointer;
   display:grid;place-items:center;color:var(--fg-2);
   background:var(--glass-4);border:1px solid var(--line-2);
   box-shadow:var(--sh-3);
@@ -1099,7 +1109,7 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
   margin-bottom:var(--sp-2);
 }
 .empty-icon svg{width:16px;height:16px}
-.empty h4{font-size:var(--fs-lead);font-weight:550;color:var(--fg)}
+.empty h3{font-size:var(--fs-lead);font-weight:550;color:var(--fg)}
 .empty p{font-size:var(--fs-sm);color:var(--fg-2);line-height:1.55;margin-top:2px}
 .empty .btn{margin-top:var(--sp-3)}
 .chips{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:var(--sp-3)}
@@ -1130,8 +1140,8 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
   justify-content:space-between;pointer-events:none}
 .gridlines span{position:relative;border-top:1px solid var(--line-1);flex:0 0 auto}
 .gridlines span i{
-  position:absolute;left:-44px;top:-8px;width:38px;text-align:right;font-style:normal;
-  font-family:var(--mono);font-size:10px;color:var(--fg-3);
+  position:absolute;left:-44px;top:-9px;width:38px;text-align:right;font-style:normal;
+  font-family:var(--mono);font-size:var(--fs-micro);color:var(--fg-3);
 }
 .bars{
   position:relative;display:flex;align-items:flex-end;gap:clamp(4px,1.1vw,10px);height:132px;
@@ -1151,8 +1161,8 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
 }
 .bar:hover .fill,.bar:focus-visible .fill{opacity:1}
 .bar .xlab{
-  position:absolute;left:50%;transform:translateX(-50%);bottom:-18px;white-space:nowrap;
-  font-family:var(--mono);font-size:10px;color:var(--fg-3);
+  position:absolute;left:50%;transform:translateX(-50%);bottom:-19px;white-space:nowrap;
+  font-family:var(--mono);font-size:var(--fs-micro);color:var(--fg-3);
 }
 .bar[data-tip]::after{bottom:calc(100% + 5px)}
 /* Edge bars anchor their tooltip inward, so it never clips at the pane's edge. */
@@ -1170,7 +1180,7 @@ button.conv-open:focus-visible{outline:2px solid var(--accent);outline-offset:2p
 .bar .peak{
   position:absolute;left:50%;transform:translateX(-50%);
   bottom:clamp(12px, calc(var(--h) + 6px), calc(100% - 20px));
-  font-family:var(--mono);font-size:10px;color:var(--accent);white-space:nowrap;
+  font-family:var(--mono);font-size:var(--fs-micro);color:var(--accent);white-space:nowrap;
 }
 .chart-x{display:flex;align-items:center;gap:6px;font-size:var(--fs-micro);color:var(--fg-3);
   padding-left:44px}
@@ -1399,7 +1409,7 @@ main.content, .scroller, .crail-list, .pal-list, .msgs{scrollbar-color:var(--fil
   nav.tabs{flex:1;flex-direction:row;justify-content:space-between;gap:2px;padding:0}
   .tab-btn{
     flex:1 1 0;flex-direction:column;gap:3px;height:auto;padding:6px 2px 5px;
-    font-size:10.5px;text-align:center;align-items:center;min-width:0;border-radius:var(--r-2);
+    font-size:var(--fs-micro);text-align:center;align-items:center;min-width:0;border-radius:var(--r-2);
   }
   .tab-btn .ico{width:18px;height:18px}
   .tab-btn .lbl{max-width:100%;overflow:hidden;text-overflow:ellipsis;flex:none}
@@ -1441,7 +1451,7 @@ main.content, .scroller, .crail-list, .pal-list, .msgs{scrollbar-color:var(--fil
   #verPill{display:none}
   .topbar-end{gap:var(--sp-2)}
   .phead{align-items:flex-start;padding-bottom:12px}
-  .phead h2{font-size:22px}
+  .phead h2{font-size:var(--fs-h2)}
   .phead-actions{width:100%;justify-content:flex-start;margin-left:0}
   #models .model-card{
     grid-template-columns:minmax(0,1fr);grid-template-areas:"name" "desc" "tags" "hint";
@@ -1464,10 +1474,10 @@ main.content, .scroller, .crail-list, .pal-list, .msgs{scrollbar-color:var(--fil
   .sheet,.palette{width:100%;border-radius:var(--r-6)}
   .veil{align-items:flex-end;padding:8px}
   .veil--top{align-items:flex-start}
-  .plot{padding-left:34px}
-  .gridlines{left:34px}
-  .gridlines span i{left:-34px;width:28px}
-  .chart-x{padding-left:34px}
+  .plot{padding-left:40px}
+  .gridlines{left:40px}
+  .gridlines span i{left:-40px;width:34px}
+  .chart-x{padding-left:40px}
   .tiles{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
 }
 /* The paired tables stack once the wide one would be squeezed. */
@@ -1494,13 +1504,13 @@ main.content, .scroller, .crail-list, .pal-list, .msgs{scrollbar-color:var(--fil
   .thread-bar input[type="password"]{width:100%;min-width:0;font-size:var(--fs-body)}
 }
 @media (max-width:560px){
-  :root{--fs-h1:21px}
+  :root{--fs-h1:20px}
   .health{font-size:var(--fs-micro)}
-  .brand-text h1{font-size:14px}
+  .brand-text h1{font-size:var(--fs-body)}
   .topbar{gap:var(--sp-2);padding:0 12px}
   .tiles{grid-template-columns:repeat(auto-fit,minmax(132px,1fr))}
   .tile{padding:10px 11px}
-  .tile .v{font-size:15px}
+  .tile .v{font-size:var(--fs-h3)}
   .seg-btn{padding:0 5px}
   .msg{grid-template-columns:20px minmax(0,1fr);gap:10px}
   .msg-avatar{width:20px;height:20px}
@@ -1519,7 +1529,7 @@ main.content, .scroller, .crail-list, .pal-list, .msgs{scrollbar-color:var(--fil
 }
 @media (max-width:400px){
   .brand-text{display:none}
-  .tab-btn{font-size:9.5px;padding:6px 1px 5px}
+  .tab-btn{padding:6px 1px 5px}
 }
 
 /* Coarse pointers get roomier targets, never smaller type. */
@@ -1884,7 +1894,7 @@ table.stack-rows td[data-label=""]::before{display:none}
           <div class="scroller">
             <table class="stack-rows">
               <caption class="sr-only">Configured cookie files and their current state</caption>
-              <thead><tr><th>Account</th><th>Google index</th><th>SAPISID</th><th>Uses</th><th>State</th></tr></thead>
+              <thead><tr><th scope="col">Account</th><th scope="col">Google index</th><th scope="col">SAPISID</th><th scope="col" class="num">Uses</th><th scope="col">State</th></tr></thead>
               <tbody id="accounts"></tbody>
             </table>
           </div>
@@ -1897,7 +1907,7 @@ table.stack-rows td[data-label=""]::before{display:none}
               <div class="scroller">
                 <table class="stack-rows">
                   <caption class="sr-only">Upstream calls per model</caption>
-                  <thead><tr><th>Model</th><th>Requests</th><th>Average</th><th>Slowest</th></tr></thead>
+                  <thead><tr><th scope="col">Model</th><th scope="col" class="num">Requests</th><th scope="col" class="num">Average</th><th scope="col" class="num">Slowest</th></tr></thead>
                   <tbody id="byModel"></tbody>
                 </table>
               </div>
@@ -1909,7 +1919,7 @@ table.stack-rows td[data-label=""]::before{display:none}
               <div class="scroller">
                 <table class="stack-rows">
                   <caption class="sr-only">Responses by status code</caption>
-                  <thead><tr><th>Code</th><th>Count</th></tr></thead>
+                  <thead><tr><th scope="col">Code</th><th scope="col" class="num">Count</th></tr></thead>
                   <tbody id="byStatus"></tbody>
                 </table>
               </div>
@@ -1925,7 +1935,7 @@ table.stack-rows td[data-label=""]::before{display:none}
           <div class="scroller">
             <table class="stack-rows">
               <caption class="sr-only">Effective configuration with secrets redacted</caption>
-              <thead><tr><th>Key</th><th>Value</th></tr></thead>
+              <thead><tr><th scope="col">Key</th><th scope="col">Value</th></tr></thead>
               <tbody id="cfgTable"></tbody>
             </table>
           </div>
@@ -1968,8 +1978,8 @@ table.stack-rows td[data-label=""]::before{display:none}
           <div class="scroller grow">
             <table class="stack-rows">
               <caption class="sr-only">Recent requests</caption>
-              <thead><tr><th>Time</th><th>Method</th><th>Path</th><th>Status</th>
-                <th>Model</th><th>Latency</th><th>Client</th><th>Request ID</th></tr></thead>
+              <thead><tr><th scope="col">Time</th><th scope="col">Method</th><th scope="col">Path</th><th scope="col">Status</th>
+                <th scope="col">Model</th><th scope="col" class="num">Latency</th><th scope="col">Client</th><th scope="col">Request ID</th></tr></thead>
               <tbody id="actRows"></tbody>
             </table>
           </div>
@@ -2004,7 +2014,7 @@ table.stack-rows td[data-label=""]::before{display:none}
               <circle cx="11" cy="11" r="6.2"/><path d="m15.6 15.6 3.9 3.9"/>
             </svg>
           </span>
-          <h4>No model matches that filter</h4>
+          <h3>No model matches that filter</h3>
           <p>Try a shorter query, or clear the filter to see every model ID.</p>
           <button class="btn btn--ghost btn--sm" id="modelFilterClear" type="button">Clear filter</button>
         </div>
@@ -2027,7 +2037,7 @@ table.stack-rows td[data-label=""]::before{display:none}
           <div class="scroller">
             <table class="stack-rows">
               <caption class="sr-only">HTTP endpoints</caption>
-              <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+              <thead><tr><th scope="col">Method</th><th scope="col">Path</th><th scope="col">Purpose</th></tr></thead>
               <tbody id="endpoints"></tbody>
             </table>
           </div>
@@ -2038,7 +2048,7 @@ table.stack-rows td[data-label=""]::before{display:none}
           <div class="scroller">
             <table class="stack-rows">
               <caption class="sr-only">Values to configure in a client</caption>
-              <thead><tr><th>Field</th><th>Value</th><th><span class="sr-only">Copy</span></th></tr></thead>
+              <thead><tr><th scope="col">Field</th><th scope="col">Value</th><th scope="col"><span class="sr-only">Copy</span></th></tr></thead>
               <tbody id="clientCfg"></tbody>
             </table>
           </div>
@@ -2047,7 +2057,6 @@ table.stack-rows td[data-label=""]::before{display:none}
         <h3 class="slabel">curl</h3>
         <div class="panel glass-2 panel--flush">
           <div class="panel-head">
-            <h3>Copy-ready examples</h3>
             <span class="sub">Replace <code>YOUR_KEY</code> when authentication is enabled.</span>
             <span class="spacer"></span>
             <button class="copy btn btn--ghost btn--sm" id="copyCurl" type="button" data-copy-target="curlBox">
@@ -2095,7 +2104,7 @@ table.stack-rows td[data-label=""]::before{display:none}
 <div class="veil" id="helpVeil" hidden>
   <div class="sheet sheet--sm glass-5" role="dialog" aria-modal="true" aria-labelledby="helpLabel">
     <div class="sheet-head">
-      <h3 id="helpLabel">Keyboard shortcuts<span class="sub">A keyboard is optional — every one of these has a button.</span></h3>
+      <h3><span id="helpLabel">Keyboard shortcuts</span><span class="sub">A keyboard is optional — every one of these has a button.</span></h3>
       <button class="btn btn--quiet btn--icon" id="helpClose" type="button" aria-label="Close">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>
@@ -2243,7 +2252,7 @@ function accountRows(credentials){
     return '<tr><td data-label="Account"><code>' + esc(a.source) + '</code></td>' +
       '<td data-label="Google index">' + esc(a.auth_user == null ? '\u2014' : a.auth_user) + '</td>' +
       '<td data-label="SAPISID">' + (a.has_sapisid ? 'yes' : '<span class="note">no</span>') + '</td>' +
-      '<td data-label="Uses">' + esc(Number(a.uses) || 0) + '</td>' +
+      '<td data-label="Uses" class="num">' + esc(Number(a.uses) || 0) + '</td>' +
       '<td data-label="State">' + state + meter + '</td></tr>';
   }).join('');
 }
@@ -3034,9 +3043,9 @@ async function refreshStatus(force){
     const names = Object.keys(models);
     $('byModel').innerHTML = names.length ? names.map((n) =>
       '<tr><td data-label="Model"><code>' + esc(n) + '</code></td>' +
-      '<td data-label="Requests" class="mono">' + esc(models[n].requests) + '</td>' +
-      '<td data-label="Average" class="mono">' + esc(fmtMs(models[n].avg_ms)) + '</td>' +
-      '<td data-label="Slowest" class="mono">' + esc(fmtMs(models[n].max_ms)) + '</td></tr>').join('')
+      '<td data-label="Requests" class="num">' + esc(models[n].requests) + '</td>' +
+      '<td data-label="Average" class="num">' + esc(fmtMs(models[n].avg_ms)) + '</td>' +
+      '<td data-label="Slowest" class="num">' + esc(fmtMs(models[n].max_ms)) + '</td></tr>').join('')
       : '<tr><td colspan="4" class="empty-cell" data-label=""><span class="note">No upstream calls yet — ' +
         'this table fills in as traffic arrives.</span></td></tr>';
 
@@ -3044,7 +3053,7 @@ async function refreshStatus(force){
     const keys = Object.keys(codes);
     $('byStatus').innerHTML = keys.length ? keys.map((k) =>
       '<tr><td data-label="Code">' + statusPill(Number(k)) + '</td>' +
-      '<td data-label="Count" class="mono">' + esc(codes[k]) + '</td></tr>').join('')
+      '<td data-label="Count" class="num">' + esc(codes[k]) + '</td></tr>').join('')
       : '<tr><td colspan="2" class="empty-cell" data-label=""><span class="note">No responses recorded yet.</span></td></tr>';
 
     $('accountsNote').innerHTML = accountsNote(s.credentials);
@@ -3086,7 +3095,7 @@ function renderChart(hist, samples){
     box.removeAttribute('aria-label');
     box.innerHTML = '<div class="empty">' +
       '<span class="empty-icon">' + ICON.pulse + '</span>' +
-      '<h4>No latency samples yet</h4>' +
+      '<h3>No latency samples yet</h3>' +
       '<p>Only upstream calls are timed, so the chart stays empty until a model answers.</p>' +
       '</div>';
     return;
@@ -3209,7 +3218,7 @@ function renderActivityRows(first){
       '<td data-label="Path"><code>' + esc(r.path) + '</code></td>' +
       '<td data-label="Status">' + statusPill(r.status) + '</td>' +
       '<td data-label="Model">' + (r.model ? '<code>' + esc(r.model) + '</code>' : '<span class="note">\u2014</span>') + '</td>' +
-      '<td class="code" data-label="Latency">' + esc(fmtMs(r.ms)) + '</td>' +
+      '<td class="code num" data-label="Latency">' + esc(fmtMs(r.ms)) + '</td>' +
       '<td class="code" data-label="Client">' + esc(r.client || '\u2014') + '</td>' +
       '<td class="code" data-label="Request ID">' + esc(r.id || '\u2014') + '</td></tr>';
   }).join('')
@@ -3286,7 +3295,7 @@ function renderMsgs(){
   if (!c || !c.messages.length) {
     box.innerHTML = '<div class="empty">' +
       '<span class="empty-icon">' + ICON.spark + '</span>' +
-      '<h4>Start a conversation</h4>' +
+      '<h3>Start a conversation</h3>' +
       '<p>Pick a model and ask anything. Replies stream in as they are generated.</p>' +
       '<div class="chips">' +
       ['Explain what this server does', 'Write a haiku about the sea',
@@ -3557,7 +3566,7 @@ renderStatic();
 /* The same empty state the chart draws for itself, so the panel does not
    change its wording the moment the first read lands. */
 $('latencyChart').innerHTML = '<div class="empty"><span class="empty-icon">' + ICON.pulse + '</span>' +
-  '<h4>No latency samples yet</h4>' +
+  '<h3>No latency samples yet</h3>' +
   '<p>Only upstream calls are timed, so the chart stays empty until a model answers.</p></div>';
 renderConvs();
 renderMsgs();

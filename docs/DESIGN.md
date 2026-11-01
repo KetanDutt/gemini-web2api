@@ -70,7 +70,7 @@ No display face, no letter-spaced headings; sentence case throughout.
 
 | Role | Size / weight | Used for |
 |---|---|---|
-| `--fs-h1` | 26px / 550 | page title only |
+| `--fs-h1` | 26px / 550 (20px at ≤560) | page title only |
 | `--fs-h2` | 20px / 550 | dialog titles |
 | `--fs-h3` | 15px / 550 | panel and chart titles |
 | `--fs-lead` | 16px / 400 | the one sentence under a page title |
@@ -80,7 +80,9 @@ No display face, no letter-spaced headings; sentence case throughout.
 | `--fs-micro` | 11.5px / 400–550 | the smallest fact on screen — never body copy |
 
 Numerals use `font-variant-numeric: tabular-nums` and the mono family wherever a
-value can change: counters, latencies, timings, IDs, status codes.
+value can change: counters, latencies, timings, IDs, status codes. Nothing on the
+page is smaller than 11.5px except keycap hints, which are decoration on a
+control that already has a label.
 
 ## Colour
 
@@ -127,6 +129,10 @@ fails otherwise, and the two would drift.
   animates; no element scales on hover.
 - **Icons** — one stroked family, 16/18px at 1.5–1.6px stroke, `currentColor`.
   No emoji, no filled glyphs, no per-state icon sets.
+- **Tables** — text left, quantities right: a `.num` column is right-aligned,
+  mono and tabular so it can be compared by eye; nothing is centred. Every
+  column header carries `scope="col"`, and each table has a caption or an
+  accessible name, because a screen reader has to pair a cell with its column.
 
 ## The two moments
 
@@ -168,7 +174,11 @@ keeps its own copy of the scale — change both, or the two surfaces drift apart
 
 ## Accessibility and responsiveness
 
-- Every state is a colour **and** a word; nothing is encoded in hue alone.
+- Every state is a colour **and** a word; nothing is encoded in hue alone, and
+  every lamp is `aria-hidden` — the word carries the meaning.
+- Headings never skip a level: the page title, then a section (`h2`), then the
+  blocks inside it (`h3`, including empty states), then dialogs (`h3` with a
+  short accessible name, not their subtitle).
 - Focus is a 2px `--accent` outline at 2px offset, visible in both schemes.
 - Live regions: the health line, the toast stack and the status text
   (`aria-live="polite"`), so a refresh is announced without stealing focus.

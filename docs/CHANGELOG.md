@@ -121,6 +121,15 @@ was reproduced.
   two surfaces read as one product. The audit, the direction and the rules are
   written down in [DESIGN.md](DESIGN.md), which is the reference to consult
   before restyling anything.
+- **The console's tables and small print were audited as markup, not just as
+  pixels.** Every column header now carries `scope="col"`, quantity columns are
+  right-aligned mono (`.num`) so a column compares down its digits, empty-state
+  titles sit at `h3` under the page's `h2` instead of skipping a level, the
+  shortcuts dialog is named by its title rather than its subtitle, and the API
+  tab no longer labels one section twice. Markdown headings in a reply, the
+  chart's axis labels and the traffic strip's caption moved onto the type scale
+  (the strip's label was 10.5px and is now 11.5px like every other meta line);
+  the page title steps 26 → 20px on phones rather than through 22 and 21.
 - **The web console's design system went to v3 — quieter and more spatial.**
   Glass is now spent only where depth explains hierarchy: the scrolled topbar,
   navigation rail, menus, dialogs, toasts and the composer float; panels,
