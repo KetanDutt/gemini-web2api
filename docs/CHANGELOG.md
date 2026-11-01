@@ -97,6 +97,25 @@ was reproduced.
 
 ### Changed
 
+- **The web console's design system is now v4 — a bench instrument, not glass.**
+  The ambient radial washes, the grain, the masked edge lights, the pointer
+  sheen and all six backdrop-blur strengths are gone; the canvas is one flat
+  paper grey and `.glass-1`…`.glass-6` survive only as an elevation scale
+  (fill plus hairline, a shadow where something genuinely floats). Depth no
+  longer carries hierarchy — type, rules and whitespace do. Language changed
+  with it: sentence case replaces the uppercase, wide-tracked labels; the pill
+  shape is gone from buttons, tabs, tags and the topbar in favour of a radius
+  scale (6 for controls, 10 for panels, 14 for dialogs); every figure is set in
+  the mono face with tabular numerals; status is a square lamp and a word, not
+  a breathing halo. The Status tab now leads with the live figures and the
+  latency chart, then counters, accounts and tables, and keeps the redacted
+  configuration as a spec-sheet list at the end. A new traffic strip sits under
+  the page rule: one tick per recent request, height for latency, colour for
+  outcome, described in words for screen readers. The models page became a
+  divided list rather than a grid of identical cards. No route, endpoint,
+  payload or interaction changed; WCAG AA contrast, visible focus and the
+  reduced-motion / reduced-transparency / high-contrast preferences remain
+  test-enforced.
 - **The web console's design system went to v3 — quieter and more spatial.**
   Glass is now spent only where depth explains hierarchy: the scrolled topbar,
   navigation rail, menus, dialogs, toasts and the composer float; panels,
