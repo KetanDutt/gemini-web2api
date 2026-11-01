@@ -5,190 +5,116 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Gemini Cookie Sync</title>
   <style>
-    /* The console's Liquid Glass tokens, scaled to a 390px popup: the same six
-       material strengths, the same hairlines and edge light, the same motion
-       scale. Kept as one block on purpose — the popup loads instantly and
-       cannot fetch the console's stylesheet. */
+    /* The console's instrument tokens at popup scale: paper grey, hairlines,
+       mono for figures, one steel-blue accent, no material effects. Kept as a
+       single block on purpose — a popup loads instantly and cannot fetch the
+       console's stylesheet, so it carries the same scale, not the same file. */
     :root{
       color-scheme:light dark;
-      --bg:#e8ebf0; --bg-top:#f3f5f9; --bg-bottom:#e1e6ee;
-      --fg:#0f131a; --fg-2:#4b5462; --fg-3:#5c6675;
-      --accent:#2b4ecb; --accent-fill:#3357d6; --accent-fg:#fff;
-      --ok:#116b46; --warn:#7b5400;
-      --glass-1:rgba(255,255,255,.48); --glass-2:rgba(255,255,255,.62);
-      --glass-3:rgba(255,255,255,.74); --glass-4:rgba(255,255,255,.85);
-      --glass-5:rgba(254,255,255,.90); --glass-6:rgba(255,255,255,.93);
-      --pane:rgba(255,255,255,.34);
-      --fill-1:rgba(16,24,40,.040); --fill-2:rgba(16,24,40,.075); --fill-3:rgba(16,24,40,.13);
-      --field:rgba(255,255,255,.40); --field-hover:rgba(255,255,255,.58); --field-focus:rgba(255,255,255,.86);
-      --code-bg:rgba(17,24,40,.05);
-      --line-1:rgba(15,20,33,.09); --line-2:rgba(15,20,33,.15);
-      --edge-hi:rgba(255,255,255,.92); --edge-lo:rgba(255,255,255,.28);
-      --surface-solid:249,250,252;
-      --ok-bg:rgba(17,107,70,.10); --ok-line:rgba(17,107,70,.26);
-      --warn-bg:rgba(138,95,4,.11); --warn-line:rgba(138,95,4,.28);
-      --acc-ring:rgba(43,78,203,.22);
-      --sh-1:0 1px 1.5px rgba(15,20,34,.045), 0 4px 12px rgba(15,20,34,.045);
-      --sh-2:0 1px 2px rgba(15,20,34,.055), 0 10px 24px rgba(15,20,34,.065);
-      --sh-3:0 1px 2px rgba(15,20,34,.06), 0 16px 38px rgba(15,20,34,.095);
-      --sh-inset:inset 0 1px 0 var(--edge-hi);
-      --sh-well:inset 0 1px 2px rgba(15,20,34,.05);
-      --sh-press:inset 0 1.5px 3px rgba(15,20,34,.10);
-      --blur-1:8px; --blur-2:14px; --blur-3:22px; --blur-4:30px;
-      --sat-2:160%; --sat-3:174%;
-      --r-1:8px; --r-2:12px; --r-3:16px; --r-4:22px; --r-5:28px; --r-full:999px;
-      --d-1:130ms; --d-2:190ms; --d-3:260ms; --d-4:380ms;
-      --e-out:cubic-bezier(.22,.61,.21,1); --e-spring:cubic-bezier(.34,1.3,.42,1);
-      --e-enter:cubic-bezier(.16,.84,.3,1);
-      --sans:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Inter",
-             system-ui,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
-      --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+      --bg:#ffffff; --sunken:#fafbf9;
+      --fg:#15191a; --fg-2:#4c5451; --fg-3:#5f6864;
+      --accent:#0d5d78; --accent-fill:#0f6d8c; --accent-hover:#0b5a76; --accent-fg:#ffffff;
+      --ok:#1a6b45;   --ok-bg:rgba(31,122,78,.09);  --ok-line:rgba(31,122,78,.28);
+      --warn:#7a5200; --warn-bg:rgba(180,124,23,.11); --warn-line:rgba(180,124,23,.32);
+      --fill-1:rgba(21,25,26,.045); --fill-2:rgba(21,25,26,.075);
+      --line-1:rgba(21,25,26,.12); --line-2:rgba(21,25,26,.20);
+      --code-bg:rgba(21,25,26,.05);
+      --sh-press:inset 0 1px 2px rgba(21,25,30,.10);
+      --r-1:4px; --r-2:6px; --r-3:8px; --r-full:999px;
+      --fs-micro:11.5px; --fs-meta:12.5px; --fs-sm:13.5px;
+      --d-2:160ms; --e-out:cubic-bezier(.22,1,.36,1);
+      --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",
+             Arial,"Noto Sans",sans-serif;
+      --mono:ui-monospace,SFMono-Regular,"SF Mono","JetBrains Mono","Cascadia Mono",
+             Menlo,Consolas,"Liberation Mono",monospace;
     }
     @media (prefers-color-scheme:dark){
       :root{
-        --bg:#080a0e; --bg-top:#0e1118; --bg-bottom:#06080b;
-        --fg:#e8ecf3; --fg-2:#a3adbc; --fg-3:#8e98a8;
-        --accent:#93aaff; --accent-fill:#3557d6;
-        --ok:#4fcb8d; --warn:#e3b063;
-        --glass-1:rgba(255,255,255,.052); --glass-2:rgba(255,255,255,.070);
-        --glass-3:rgba(255,255,255,.085); --glass-4:rgba(38,43,52,.78);
-        --glass-5:rgba(30,34,42,.86); --glass-6:rgba(36,41,50,.90);
-        --pane:rgba(255,255,255,.022);
-        --fill-1:rgba(255,255,255,.045); --fill-2:rgba(255,255,255,.082);
-        --fill-3:rgba(255,255,255,.14);
-        --field:rgba(255,255,255,.048); --field-hover:rgba(255,255,255,.070);
-        --field-focus:rgba(255,255,255,.090);
-        --code-bg:rgba(0,0,0,.34);
-        --line-1:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.155);
-        --edge-hi:rgba(255,255,255,.14); --edge-lo:rgba(255,255,255,.045);
-        --surface-solid:20,23,29;
-        --ok-bg:rgba(79,203,141,.12); --ok-line:rgba(79,203,141,.30);
-        --warn-bg:rgba(227,176,99,.12); --warn-line:rgba(227,176,99,.30);
-        --acc-ring:rgba(147,170,255,.26);
-        --sh-1:0 1px 1.5px rgba(0,0,0,.38), 0 4px 12px rgba(0,0,0,.24);
-        --sh-2:0 1px 2px rgba(0,0,0,.42), 0 10px 26px rgba(0,0,0,.32);
-        --sh-3:0 2px 4px rgba(0,0,0,.46), 0 18px 42px rgba(0,0,0,.44);
-        --sh-inset:inset 0 1px 0 var(--edge-hi);
-        --sh-well:inset 0 1px 2px rgba(0,0,0,.34);
-        --sh-press:inset 0 1.5px 3px rgba(0,0,0,.45);
+      --bg:#181b1f; --sunken:#15181c;
+      --fg:#e9ebe8; --fg-2:#a7aeab; --fg-3:#8a928e;
+      --accent:#7fc9e0; --accent-fill:#8ed2e6; --accent-hover:#9adcee; --accent-fg:#08222b;
+      --ok:#6fcf9b;   --ok-bg:rgba(111,207,155,.12); --ok-line:rgba(111,207,155,.30);
+      --warn:#d9ad63; --warn-bg:rgba(217,173,99,.12); --warn-line:rgba(217,173,99,.30);
+      --fill-1:rgba(255,255,255,.05); --fill-2:rgba(255,255,255,.09);
+      --line-1:rgba(255,255,255,.10); --line-2:rgba(255,255,255,.17);
+      --code-bg:rgba(255,255,255,.06);
+      --sh-press:inset 0 1px 2px rgba(0,0,0,.40);
       }
     }
-    @supports not ((backdrop-filter:blur(4px)) or (-webkit-backdrop-filter:blur(4px))){
-      :root{--glass-2:rgba(var(--surface-solid),.96); --glass-3:rgba(var(--surface-solid),.97);
-        --glass-4:rgba(var(--surface-solid),.98); --field-focus:rgb(var(--surface-solid));}
-    }
-    @media (prefers-reduced-transparency:reduce){
-      :root{--glass-2:rgba(var(--surface-solid),.97); --glass-3:rgba(var(--surface-solid),.98);
-        --glass-4:rgb(var(--surface-solid)); --field:rgba(var(--surface-solid),.88);
-        --field-focus:rgb(var(--surface-solid));}
-    }
     @media (prefers-contrast:more){
-      :root{--line-1:rgba(15,20,33,.26); --line-2:rgba(15,20,33,.38);
-        --fg-2:#3a424f; --fg-3:#4a5361; --glass-2:rgba(var(--surface-solid),.96);}
+      :root{--line-1:rgba(21,25,26,.28); --line-2:rgba(21,25,26,.42);
+        --fg-2:#3a3f3d; --fg-3:#474c49}
+    }
+    @media (prefers-contrast:more) and (prefers-color-scheme:dark){
+      :root{--line-1:rgba(255,255,255,.24); --line-2:rgba(255,255,255,.36);
+        --fg-2:#c6ccc9; --fg-3:#b3bab7}
     }
 
     *,*::before,*::after{box-sizing:border-box}
     body{
-      width:390px;margin:0;padding:14px;
-      font:400 13.5px/1.58 var(--sans);color:var(--fg);
-      background:var(--bg);
-      background-image:
-        radial-gradient(58% 46% at 104% -14%, rgba(63,99,224,.15), transparent 62%),
-        radial-gradient(52% 44% at -18% 112%, rgba(24,150,116,.10), transparent 64%),
-        linear-gradient(178deg, var(--bg-top) 0%, var(--bg) 48%, var(--bg-bottom) 100%);
+      width:390px;margin:0;padding:16px;
+      font:400 var(--fs-sm)/1.55 var(--sans);color:var(--fg);background:var(--bg);
       -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
     }
-    h1{margin:0;font-size:15px;font-weight:625;letter-spacing:-.022em;line-height:1.15}
+    h1{margin:0;font-size:15px;font-weight:550;line-height:1.2;color:var(--fg)}
     p{margin:0}
-    .panel{
-      position:relative;border-radius:var(--r-5);padding:15px;
-      background:var(--glass-2);border:1px solid var(--line-1);
-      -webkit-backdrop-filter:blur(var(--blur-3)) saturate(var(--sat-2));
-      backdrop-filter:blur(var(--blur-3)) saturate(var(--sat-2));
-      box-shadow:var(--sh-3), var(--sh-inset);
-      display:flex;flex-direction:column;gap:11px;
-    }
-    /* Edge light: 1px of gradient drawn inside the frame with a mask. */
-    .panel::before{
-      content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;padding:1px;
-      background:linear-gradient(158deg, var(--edge-hi), transparent 34%, transparent 66%, var(--edge-lo));
-      -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-      mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-      -webkit-mask-composite:xor;mask-composite:exclude;
-    }
+    /* The window is the panel. Nothing floats inside it, so nothing needs a
+       shadow or a second surface behind it. */
+    .panel{display:flex;flex-direction:column;gap:12px}
     .head{display:flex;align-items:center;gap:10px}
     .mark{
-      width:34px;height:34px;flex:0 0 34px;border-radius:var(--r-2);
-      display:grid;place-items:center;
-      background:var(--glass-4);border:1px solid var(--line-1);
-      box-shadow:var(--sh-1), var(--sh-inset);
+      width:32px;height:32px;flex:0 0 32px;display:grid;place-items:center;
+      border-radius:var(--r-2);background:var(--sunken);
+      border:1px solid var(--line-1);color:var(--accent);
     }
-    .mark svg{width:19px;height:19px;display:block}
-    .head .sub{font-size:11.5px;color:var(--fg-3);margin-top:1px}
-    .lede{font-size:12.5px;color:var(--fg-2);line-height:1.6}
-    .actions{display:flex;flex-direction:column;gap:7px;margin-top:1px}
+    .mark svg{width:18px;height:18px;display:block}
+    .head .sub{font-size:var(--fs-micro);color:var(--fg-3);margin-top:2px}
+    .lede{font-size:var(--fs-meta);color:var(--fg-2)}
+    .actions{display:flex;flex-direction:column;gap:8px;margin-top:2px}
     button{
-      appearance:none;cursor:pointer;width:100%;min-height:38px;
-      position:relative;overflow:hidden;
+      appearance:none;cursor:pointer;width:100%;height:36px;
       display:inline-flex;align-items:center;justify-content:center;gap:8px;
-      padding:9px 13px;border-radius:var(--r-2);border:1px solid transparent;
-      font:inherit;font-size:13.5px;font-weight:570;letter-spacing:-.004em;
-      transition:transform var(--d-1) var(--e-out), filter var(--d-2) var(--e-out),
-                 background-color var(--d-2) var(--e-out), border-color var(--d-2) var(--e-out),
-                 box-shadow var(--d-2) var(--e-out), opacity var(--d-2) var(--e-out);
-    }
-    button svg{width:15px;height:15px;display:block;opacity:.9}
-    button:active{transform:scale(.982)}
-    button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-    button:disabled{opacity:.5;cursor:progress;transform:none;filter:saturate(.6)}
-    #export{
-      background:var(--accent-fill);color:var(--accent-fg);
-      box-shadow:0 1px 1.5px rgba(15,20,34,.16), 0 8px 20px var(--acc-ring),
-                 inset 0 1px 0 rgba(255,255,255,.26);
-    }
-    #export:hover:not(:disabled){filter:brightness(1.07);transform:translateY(-1px);
-      box-shadow:0 2px 5px rgba(15,20,34,.16), 0 14px 30px var(--acc-ring),
-                 inset 0 1px 0 rgba(255,255,255,.26)}
-    #export:active:not(:disabled){transform:translateY(0) scale(.982);
-      box-shadow:0 1px 2px rgba(15,20,34,.16), 0 3px 10px var(--acc-ring), var(--sh-press)}
-    #inspect,#open{
-      background:var(--glass-3);color:var(--fg);border-color:var(--line-1);
-      -webkit-backdrop-filter:blur(var(--blur-2)) saturate(var(--sat-2));
-      backdrop-filter:blur(var(--blur-2)) saturate(var(--sat-2));
-      box-shadow:var(--sh-1), var(--sh-inset);
-    }
-    #inspect:hover:not(:disabled),#open:hover:not(:disabled){
-      background:var(--glass-4);border-color:var(--line-2);
-      box-shadow:var(--sh-2), var(--sh-inset);
-    }
-    #inspect:active:not(:disabled),#open:active:not(:disabled){box-shadow:var(--sh-1), var(--sh-press)}
-    /* Status well: a dot that breathes, then the message. */
-    #status{
-      position:relative;display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 9px;
-      align-items:start;
-      border-radius:var(--r-3);padding:11px 12px;margin:0;
-      background:var(--field);border:1px solid var(--line-1);
-      box-shadow:var(--sh-well);
-      font-family:var(--mono);font-size:11.5px;line-height:1.6;color:var(--fg-2);
-      min-height:46px;max-height:250px;overflow-y:auto;
-      white-space:pre-wrap;overflow-wrap:anywhere;
-      transition:background-color var(--d-2) var(--e-out),border-color var(--d-2) var(--e-out),
+      padding:0 12px;border-radius:var(--r-3);
+      border:1px solid var(--line-2);background:var(--sunken);color:var(--fg);
+      font:inherit;font-size:var(--fs-sm);font-weight:500;
+      transition:background-color var(--d-2) var(--e-out),
+                 border-color var(--d-2) var(--e-out),
                  color var(--d-2) var(--e-out);
     }
+    button svg{width:16px;height:16px;display:block;opacity:.85}
+    button:hover:not(:disabled){background:var(--fill-1)}
+    button:active:not(:disabled){background:var(--fill-2);box-shadow:var(--sh-press)}
+    button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    button:disabled{opacity:.55;cursor:progress}
+    #export{background:var(--accent-fill);border-color:var(--accent-fill);
+      color:var(--accent-fg);font-weight:550}
+    #export:hover:not(:disabled){background:var(--accent-hover)}
+    #export svg{opacity:1}
+    #export:hover:not(:disabled){background:var(--accent-hover);border-color:var(--accent-hover)}
+    #status{
+      display:flex;align-items:flex-start;gap:8px;
+      padding:8px 10px;border-radius:var(--r-2);
+      background:var(--sunken);border:1px solid var(--line-1);
+      font-size:var(--fs-meta);color:var(--fg-2);
+    }
+    /* A state is a square lamp plus its fact in words. */
     #status::before{
-      content:"";grid-row:1;grid-column:1;width:7px;height:7px;margin-top:6px;
-      border-radius:50%;background:currentColor;opacity:.75;
-      transition:background-color var(--d-2) var(--e-out),opacity var(--d-2) var(--e-out);
+      content:"";flex:0 0 7px;width:7px;height:7px;margin-top:6px;
+      border-radius:1px;background:var(--fg-3);
     }
     #status.ok{background:var(--ok-bg);border-color:var(--ok-line);color:var(--ok)}
+    #status.ok::before{background:var(--ok)}
     #status.warn{background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn)}
-    #status.ok::before,#status.warn::before{opacity:1}
+    #status.warn::before{background:var(--warn)}
     code{
-      font-family:var(--mono);font-size:.93em;direction:ltr;unicode-bidi:embed;
+      font-family:var(--mono);font-size:12px;direction:ltr;unicode-bidi:embed;
       background:var(--code-bg);border:1px solid var(--line-1);
-      padding:1px 5px;border-radius:5px;word-break:break-all;
+      padding:1px 5px;border-radius:var(--r-1);
     }
-    .note{font-size:11.5px;color:var(--fg-3);line-height:1.58}
+    .note{
+      font-size:var(--fs-micro);color:var(--fg-3);line-height:1.5;
+      padding-top:12px;border-top:1px solid var(--line-1);
+    }
     .note strong{color:var(--fg-2);font-weight:600}
     ::-webkit-scrollbar{width:9px;height:9px}
     ::-webkit-scrollbar-thumb{background:var(--fill-2);border-radius:var(--r-full);
@@ -202,15 +128,8 @@
   <div class="panel">
     <div class="head">
       <span class="mark" aria-hidden="true">
-        <svg viewBox="0 0 32 32">
-          <defs>
-            <linearGradient id="brandGrad" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stop-color="#4285f4"/>
-              <stop offset=".5" stop-color="#9b72cb"/>
-              <stop offset="1" stop-color="#d96570"/>
-            </linearGradient>
-          </defs>
-          <path fill="url(#brandGrad)" d="M16 2C17 10.2 21.8 15 30 16C21.8 17 17 21.8 16 30C15 21.8 10.2 17 2 16C10.2 15 15 10.2 16 2Z"/>
+        <svg viewBox="0 0 32 32" fill="currentColor">
+          <path d="M16 2C17 10.2 21.8 15 30 16C21.8 17 17 21.8 16 30C15 21.8 10.2 17 2 16C10.2 15 15 10.2 16 2Z"/>
         </svg>
       </span>
       <div>
@@ -224,19 +143,19 @@
 
     <div class="actions">
       <button id="export" type="button">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M12 4v11M12 15l-4.2-4.2M12 15l4.2-4.2M5 19.5h14"/>
         </svg>
         Export gemini-auth.json
       </button>
       <button id="inspect" type="button">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="11" cy="11" r="6.2"/><path d="m15.6 15.6 3.9 3.9"/>
         </svg>
         Inspect session
       </button>
       <button id="open" type="button">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M13.5 5.5H18.5V10.5M18.5 5.5l-7.4 7.4M16 14v3.5A2.5 2.5 0 0 1 13.5 20h-7A2.5 2.5 0 0 1 4 17.5v-7A2.5 2.5 0 0 1 6.5 8H10"/>
         </svg>
         Open Gemini

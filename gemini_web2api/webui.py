@@ -1560,7 +1560,10 @@ main.content, .scroller, .crail-list, .pal-list, .msgs{scrollbar-color:var(--fil
 @media (prefers-reduced-transparency:reduce){
   .veil{background:rgba(17,21,22,.72)}
 }
-/* Higher contrast: firmer hairlines and stronger secondary ink. */
+/* Higher contrast: firmer hairlines and stronger secondary ink. The dark
+   values are stated twice for the same reason the theme blocks are: an
+   explicit `data-theme="dark"` must beat the light defaults, and a system
+   preference must beat them when no theme is set. */
 @media (prefers-contrast:more){
   :root{
     --line-1:rgba(21,25,26,.28);
@@ -1568,6 +1571,22 @@ main.content, .scroller, .crail-list, .pal-list, .msgs{scrollbar-color:var(--fil
     --line-3:rgba(21,25,26,.55);
     --fg-2:#3a4240;
     --fg-3:#4a5250;
+  }
+  :root[data-theme="dark"]{
+    --line-1:rgba(255,255,255,.26);
+    --line-2:rgba(255,255,255,.38);
+    --line-3:rgba(255,255,255,.52);
+    --fg-2:#c6ccc9;
+    --fg-3:#b3bab7;
+  }
+}
+@media (prefers-contrast:more) and (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --line-1:rgba(255,255,255,.26);
+    --line-2:rgba(255,255,255,.38);
+    --line-3:rgba(255,255,255,.52);
+    --fg-2:#c6ccc9;
+    --fg-3:#b3bab7;
   }
 }
 @media print{
@@ -2156,7 +2175,7 @@ const fmtCount = (n) => {
 /* Metric keys arrive snake_cased from the server; the interface reads sentence
    case, so one helper owns the translation. */
 const human = (k) => {
-  const t = String(k ?? '').replace(/[_-]+/g, ' ').trim();
+  const t = String(k ?? '').replace(/[_-]+/g, ' ').trim().replace(/ total$/i, '');
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : '';
 };
 const pill = (text, level) => '<span class="tag ' + (level || '') + '">' + esc(text) + '</span>';
@@ -2992,7 +3011,7 @@ async function refreshStatus(force){
       fatal.map((f) => callout('bad', '<strong>Not ready.</strong> ' + esc(f))).join('') +
       warns.map((w) => callout('warn', esc(w))).join('') +
       (!fatal.length && !warns.length
-        ? callout('ok', 'Every startup check passed. Streaming, authentication and cookie state are as configured.')
+        ? callout('ok', 'All startup checks passed.')
         : '');
 
     $('counters').innerHTML = Object.keys(c).map((k, i) =>
@@ -3051,7 +3070,7 @@ async function refreshStatus(force){
   }
 }
 function fmtCfg(v){
-  if (v === null || v === undefined) return 'null';
+  if (v === null || v === undefined) return '\u2014';
   if (typeof v === 'boolean') return v ? 'true' : 'false';
   if (Array.isArray(v)) return v.length ? '[' + v.length + ' items]' : '[]';
   return String(v);
@@ -3073,8 +3092,16 @@ function renderChart(hist, samples){
     return;
   }
   const values = buckets.map((k) => Number(hist[k]) || 0);
-  const total = values.reduce((a, b) => a + b, 0) || 1;
+  const sum = values.reduce((a, b) => a + b, 0);
+  const total = sum || 1;
   const max = Math.max.apply(null, values);
+  /* The median bucket, from the histogram itself: a comparison the reader can
+     hold on to, where "busiest bucket" only repeated the peak label. */
+  let seen = 0, median = buckets[0];
+  for (let i = 0; i < values.length; i += 1) {
+    seen += values[i];
+    if (seen * 2 >= sum) { median = buckets[i]; break; }
+  }
   const label = (k) => k === 'inf' ? '\u221e' : (Number(k) >= 1000 ? (Number(k) / 1000) + 's' : k + 'ms');
   const summary = buckets.map((k, i) => 'up to ' + label(k) + ': ' + values[i]).join(', ');
   box.setAttribute('role', 'img');
@@ -3087,7 +3114,7 @@ function renderChart(hist, samples){
   const peak = values.indexOf(max);
   box.innerHTML =
     '<div class="chart-head"><h3>Upstream latency</h3>' +
-    '<span class="sub">' + esc((samples || total)) + ' samples &middot; busiest bucket ' + esc(fmtCount(max)) + '</span>' +
+    '<span class="sub">' + esc((samples || sum)) + ' samples &middot; median &le; ' + esc(label(median)) + '</span>' +
     '<span class="spacer"></span>' +
     '<span class="chart-legend"><span class="swatch"></span>Requests per bucket</span></div>' +
     '<div class="plot"><div class="gridlines">' + grid + '</div><div class="bars">' +
@@ -3122,7 +3149,7 @@ function renderStrip(history){
   box.setAttribute('aria-label', 'Last ' + rows.length + ' requests, oldest first. Highest latency ' +
     Math.round(slowest) + ' milliseconds. ' + bad + ' with an error status.');
   box.innerHTML =
-    '<span class="strip-lbl">last ' + rows.length + '</span>' +
+    '<span class="strip-lbl">last ' + rows.length + ' request' + (rows.length === 1 ? '' : 's') + '</span>' +
     '<span class="strip-ticks">' + rows.map((r) => {
       const ms = Number(r.ms) || 0;
       const h = Math.max(3, Math.round(ms / slowest * 20));

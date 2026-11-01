@@ -115,7 +115,12 @@ was reproduced.
   divided list rather than a grid of identical cards. No route, endpoint,
   payload or interaction changed; WCAG AA contrast, visible focus and the
   reduced-motion / reduced-transparency / high-contrast preferences remain
-  test-enforced.
+  test-enforced, and high contrast now reaches the dark theme instead of only
+  the light one. The cookie-sync extension's popup moved to the same tokens —
+  flat canvas, hairline panel, square state lamp, flat accent sparkle — so the
+  two surfaces read as one product. The audit, the direction and the rules are
+  written down in [DESIGN.md](DESIGN.md), which is the reference to consult
+  before restyling anything.
 - **The web console's design system went to v3 — quieter and more spatial.**
   Glass is now spent only where depth explains hierarchy: the scrolled topbar,
   navigation rail, menus, dialogs, toasts and the composer float; panels,
