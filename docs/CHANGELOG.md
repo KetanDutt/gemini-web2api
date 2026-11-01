@@ -129,7 +129,11 @@ was reproduced.
   tab no longer labels one section twice. Markdown headings in a reply, the
   chart's axis labels and the traffic strip's caption moved onto the type scale
   (the strip's label was 10.5px and is now 11.5px like every other meta line);
-  the page title steps 26 → 20px on phones rather than through 22 and 21.
+  the page title steps 26 → 20px on phones rather than through 22 and 21. The
+  chart and the traffic strip now describe themselves in spoken English —
+  "Up to 1 second: 18 requests … Above 2 seconds: 1 request", "None ended in an
+  error status" — instead of reading axis shorthand aloud, and the palette's
+  insets line up with its search field.
 - **The web console's design system went to v3 — quieter and more spatial.**
   Glass is now spent only where depth explains hierarchy: the scrolled topbar,
   navigation rail, menus, dialogs, toasts and the composer float; panels,

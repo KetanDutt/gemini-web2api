@@ -1269,7 +1269,7 @@ footer.foot #foot>span{min-width:0}
 
 /* Command palette — a floating search field, not a page. */
 .palette{
-  width:min(600px,100%);border-radius:var(--r-5);overflow:hidden;
+  width:min(600px,100%);border-radius:var(--r-6);overflow:hidden;
   display:flex;flex-direction:column;
   animation:sheetIn var(--d-3) var(--e-out) both;
 }
@@ -1280,13 +1280,13 @@ footer.foot #foot>span{min-width:0}
   font-size:var(--fs-lead);
 }
 .pal-input input:focus{box-shadow:none;background:none}
-.pal-list{max-height:min(52vh,420px);overflow:auto;padding:6px;display:flex;flex-direction:column;gap:1px}
+.pal-list{max-height:min(52vh,420px);overflow:auto;padding:8px;display:flex;flex-direction:column;gap:2px}
 .pal-group{padding:8px 8px 4px;font-size:var(--fs-micro);font-weight:500;color:var(--fg-3);
   letter-spacing:0;text-transform:none}
 .pal-item{
   position:relative;appearance:none;border:1px solid transparent;background:none;
   cursor:pointer;width:100%;
-  display:flex;align-items:center;gap:10px;padding:7px 9px;border-radius:var(--r-1);
+  display:flex;align-items:center;gap:8px;padding:8px;border-radius:var(--r-1);
   font-size:var(--fs-sm);color:var(--fg);text-align:left;
   transition:background-color var(--d-1) var(--e-out),border-color var(--d-1) var(--e-out);
 }
@@ -1295,8 +1295,8 @@ footer.foot #foot>span{min-width:0}
 .pal-item .kbd{font-size:10px;color:var(--fg-3)}
 .pal-item[aria-selected="true"]{background:var(--fill-2);border-color:var(--line-1)}
 .pal-item[aria-selected="true"] .ico{color:var(--accent)}
-.pal-empty{padding:24px 14px;text-align:center;color:var(--fg-3);font-size:var(--fs-sm)}
-.pal-foot{display:flex;align-items:center;gap:14px;padding:8px 14px;border-top:1px solid var(--line-1);
+.pal-empty{padding:var(--sp-6) var(--sp-4);text-align:center;color:var(--fg-3);font-size:var(--fs-sm)}
+.pal-foot{display:flex;align-items:center;gap:var(--sp-3);padding:8px var(--sp-4);border-top:1px solid var(--line-1);
   font-size:var(--fs-micro);color:var(--fg-3);background:var(--glass-1)}
 .pal-foot span{display:inline-flex;align-items:center;gap:5px}
 
@@ -3112,7 +3112,19 @@ function renderChart(hist, samples){
     if (seen * 2 >= sum) { median = buckets[i]; break; }
   }
   const label = (k) => k === 'inf' ? '\u221e' : (Number(k) >= 1000 ? (Number(k) / 1000) + 's' : k + 'ms');
-  const summary = buckets.map((k, i) => 'up to ' + label(k) + ': ' + values[i]).join(', ');
+  // Buckets are upper bounds, so the last one is "above the one before it".
+  const speak = (k, i) => {
+    const size = (v) => {
+      const n = Number(v);
+      return n >= 1000 ? (n / 1000) + (n === 1000 ? ' second' : ' seconds')
+                       : n + ' milliseconds';
+    };
+    if (k !== 'inf') return 'Up to ' + size(k);
+    const prev = Number(buckets[i - 1]);
+    return prev ? 'Above ' + size(prev) : 'Without an upper bound';
+  };
+  const summary = buckets.map((k, i) =>
+    speak(k, i) + ': ' + values[i] + (values[i] === 1 ? ' request' : ' requests')).join('; ');
   box.setAttribute('role', 'img');
   box.setAttribute('aria-label',
     'Upstream latency histogram over ' + (samples || total) + ' samples. ' + summary + '.');
@@ -3155,8 +3167,12 @@ function renderStrip(history){
   const bad = rows.filter((r) => Number(r.status) >= 400).length;
   box.hidden = false;
   box.setAttribute('role', 'img');
+  // Spoken, not printed: a listener gets the count, the peak and the outcome in
+  // sentences, never axis shorthand like "250ms" or "∞".
   box.setAttribute('aria-label', 'Last ' + rows.length + ' requests, oldest first. Highest latency ' +
-    Math.round(slowest) + ' milliseconds. ' + bad + ' with an error status.');
+    Math.round(slowest) + ' milliseconds. ' +
+    (bad ? bad + (bad === 1 ? ' request ended' : ' requests ended') + ' in an error status.'
+         : 'None ended in an error status.'));
   box.innerHTML =
     '<span class="strip-lbl">last ' + rows.length + ' request' + (rows.length === 1 ? '' : 's') + '</span>' +
     '<span class="strip-ticks">' + rows.map((r) => {
